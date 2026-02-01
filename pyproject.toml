@@ -1,0 +1,27 @@
+# Ruff: Linter & Formatter
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# Mypy: Type Checking logic
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Analyze only these targets
+files = [
+    "ram_miner",
+    "tests",
+]
+
+# Pytest: Asyncio configuration for Scrapy 2.14
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
