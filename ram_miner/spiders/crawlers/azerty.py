@@ -7,7 +7,8 @@ import scrapy
 from scrapy.http import Response
 
 from ram_miner.items import RamItem
-from ram_miner.utils.extract import extract_int
+from ram_miner.utils.cleaning import parse_modules
+from ram_miner.utils.extract import calculate_price_per_gb, extract_int
 
 
 class AzertySpider(scrapy.Spider):
@@ -140,16 +141,15 @@ class AzertySpider(scrapy.Spider):
                     f"Failed to parse price: {price_raw} (cleaned: {clean_price}) at {response.url}"
                 )
 
+        item["stock_quantity"] = extract_int(
+            response.css("span.text-right::text").get()
+        )
         # --- Availability ---
         stock_text = response.css(".stock-status::text").get()
         item["availability"] = (
-            "In Stock"
-            if stock_text and "op voorraad" in stock_text.lower()
-            else "Out of Stock"
+            "In Stock" if item.get("stock_quantity") > 0 else "Out of Stock"
         )
 
-        # --- Technical Specs ---
-        # Specs are often in a <table> or <dl> list. We iterate rows to find keys.
         # Broader selector: "table tr" covers tables without specific class.
         specs_table = response.css("table tr, dl.spec-list div")
 
@@ -170,6 +170,9 @@ class AzertySpider(scrapy.Spider):
             ):
                 # e.g., "32 GB" -> 32
                 item["capacity_gb"] = extract_int(val)
+                item["price_per_gb"] = calculate_price_per_gb(
+                    item.get("price"), item["capacity_gb"]
+                )
             elif "snelheid" in key or "speed" in key or "overdracht" in key:
                 # e.g., "6000 MHz" -> 6000
                 # Logic to prefer highest value (Transfer Rate vs Clock) if multiple rows exist
@@ -186,6 +189,7 @@ class AzertySpider(scrapy.Spider):
             elif "modules" in key or "kit" in key or "layout" in key:
                 # e.g., "2 x 16 GB" (Note: Pipeline will normalize this via 'parse_modules')
                 item["modules"] = val
+                item["modules_count"], item["module_capacity_gb"] = parse_modules(val)
             elif "component" in key or "gebruik" in key:
                 item["system_of_usage"] = val
             elif "voltage" in key:
