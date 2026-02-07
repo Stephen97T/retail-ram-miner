@@ -2,9 +2,12 @@ from ram_miner.utils.cleaning import normalize_system, parse_modules
 
 
 def test_parse_modules_valid_cases():
+    assert parse_modules("2 x 16") == (2, 16)
     assert parse_modules("2x16GB") == (2, 16)
+    assert parse_modules("2x16") == (2, 16)
     assert parse_modules("4x8 GB") == (4, 8)
     assert parse_modules("1x32gb") == (1, 32)
+    assert parse_modules("2 x 32 G b") == (2, 32)
 
 
 def test_parse_modules_invalid_cases():

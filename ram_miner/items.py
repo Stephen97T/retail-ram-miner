@@ -22,6 +22,7 @@ class RamItem(scrapy.Item):
     # Store Info
     availability = scrapy.Field()  # 'In Stock' or 'Out of Stock'
     stock_quantity = scrapy.Field()  # Integer or None if unknown
+    stock_supplier = scrapy.Field()  # Integer or None if unknown
     order_limit = scrapy.Field()  # Max units per order, if any
 
     # Metadata & Links

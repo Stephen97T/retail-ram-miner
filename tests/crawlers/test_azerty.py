@@ -90,18 +90,23 @@ class TestAzertySpider:
             == "https://azerty.nl/product/corsair-vengeance-rgb-geheugen/9509576"
         )
         assert item["currency"] == "EUR"
-        assert item["price"] == 449
+        assert item["price"] == 449.0
+
+        # Check missing fields
+        assert (
+            item["sku"] == "9509576"
+        )  # Assuming data-sku matches url id or present in form
 
         # Specs
         assert item["capacity_gb"] == 32
         assert item["speed_mhz"] == 6000  # Should trigger on "Overdrachtssnelheid"
         assert item["generation"] == "DDR5"
-        assert item["modules"] == "2 x 16"  # Matches "2 x 16" from table
+        assert item["modules"] == "2 x 16"  # Matches "2 x 16" from table/cleaning logic
         assert item["latency"] == 36
-        assert item["system_of_usage"] == "PC"
+        assert item["system_of_usage"] == "PC"  # If normalized, or check raw if not
 
         # Availability - based on file content (I assume it's valid, but let's check field exists)
-        assert item.get("availability") in ["In Stock", "Out of Stock"]
+        assert item.get("availability") == "In Stock"
 
         # Metadata
         assert item.get("sku") == "9509576"

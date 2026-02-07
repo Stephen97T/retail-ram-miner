@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import re
 
-MODULES_PATTERN = re.compile(
-    r"(?P<count>\d+)\s*[xX]\s*(?P<capacity>\d+)\s*(?:GB|G[Bb])"
-)
+MODULES_PATTERN = re.compile(r"(?P<count>\d+)\s*[xX]\s*(?P<capacity>\d+)")
 
 SYSTEM_DESKTOP = {"pc", "desktop", "tower"}
 SYSTEM_LAPTOP = {"laptop", "notebook", "ultrabook"}
