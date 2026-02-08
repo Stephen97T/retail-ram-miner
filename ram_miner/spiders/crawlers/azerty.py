@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import datetime
+from datetime import UTC, datetime
 
 import scrapy
 from scrapy.http import Response
@@ -73,7 +73,7 @@ class AzertySpider(scrapy.Spider):
         # Metadata
         item["store"] = "Azerty"
         item["url"] = response.url
-        item["timestamp"] = datetime.now()
+        item["timestamp"] = datetime.now(UTC)
         item["currency"] = "EUR"
 
         #  Pricing
@@ -102,6 +102,8 @@ class AzertySpider(scrapy.Spider):
         item["availability"] = (
             "In Stock" if (item.get("stock_quantity") or 0) > 0 else "Out of Stock"
         )
+        limit = response.css("div.cmsb1657-flex p::text").get()
+        item["order_limit"] = extract_int(limit if limit else "")
 
         # Specs
         specs = extract_azerty_specs(response)
