@@ -7,9 +7,9 @@ import scrapy
 from scrapy.http import Response
 
 from ram_miner.items import RamItem
+from ram_miner.utils.cleaning import clean_price
 from ram_miner.utils.extract import (
     calculate_price_per_gb,
-    clean_price,
     extract_azerty_specs,
     extract_int,
 )
@@ -70,49 +70,40 @@ class AzertySpider(scrapy.Spider):
         """
         item = RamItem()
 
-        # --- Metadata ---
+        # Metadata
         item["store"] = "Azerty"
         item["url"] = response.url
         item["timestamp"] = datetime.now()
         item["currency"] = "EUR"
 
-        # --- Basic Product Info ---
-        # Title is often in h1 > span.base
+        #  Pricing
+        price_raw = listing_price
+        if not price_raw:
+            # Try to extract from product page if not passed from listing
+            price_raw = response.css("span.price span.price::text").get()
+        item["price"] = clean_price(price_raw)
+
+        # Title
         item["name"] = (
             response.css("h1 span.base::text").get()
             or response.css("h1::text").get(default="")
         ).strip()
 
-        # SKU Extraction: Try data attribute on form first
-        item["sku"] = response.css("form#product_addtocart_form::attr(data-sku)").get()
-
-        # Image Extraction: Try og:image first, then fallback
+        # Image Extraction
         item["image_url"] = (
             response.css('meta[property="og:image"]::attr(content)').get()
             or response.css(".product-image img::attr(src)").get()
         )
 
-        # --- Pricing ---
-        # Prefer listing price passed from parse(), fallback to detail page price
-        price_raw = listing_price
-        if not price_raw:
-            # Try .current-price (legacy?)
-            price_raw = response.css(".current-price::text").get()
-        if not price_raw:
-            # Try meta itemprop="price"
-            price_raw = response.css('meta[itemprop="price"]::attr(content)').get()
-
-        item["price"] = clean_price(price_raw)
-
-        item["stock_quantity"] = extract_int(
-            response.css("span.text-right::text").get()
-        )
-        # --- Availability ---
+        # Availability
+        voorraad = [a.strip() for a in response.css("span.text-right::text").getall()]
+        item["stock_quantity"] = extract_int(voorraad[0]) if voorraad else None
+        item["stock_supplier"] = extract_int(voorraad[1]) if len(voorraad) > 1 else None
         item["availability"] = (
             "In Stock" if (item.get("stock_quantity") or 0) > 0 else "Out of Stock"
         )
 
-        # --- Specs ---
+        # Specs
         specs = extract_azerty_specs(response)
         item.update(specs)
 

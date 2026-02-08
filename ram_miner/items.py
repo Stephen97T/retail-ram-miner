@@ -2,31 +2,37 @@ import scrapy
 
 
 class RamItem(scrapy.Item):
-    # Primary Data
-    name = scrapy.Field()  # Full product title
-    price = scrapy.Field()  # Cleaned float (e.g., 120.50)
-    price_per_gb = scrapy.Field()  # Derived float (e.g., 3.76)
-    currency = scrapy.Field()  # 'EUR'
-    store = scrapy.Field()  # 'Azerty' or 'Alternate'
+    # --- Hardware & Brand (Static Spec Data) ---
+    brand = scrapy.Field()
+    mpn = scrapy.Field()  # Manufacturer Part Number
+    ean = scrapy.Field()  # EAN/Barcode
+    capacity_gb = scrapy.Field()
+    clock_speed = scrapy.Field()
+    transfer_speed = scrapy.Field()
+    generation = scrapy.Field()
+    latency = scrapy.Field()
+    modules_count = scrapy.Field()
+    module_capacity_gb = scrapy.Field()
+    system_of_usage = scrapy.Field()
 
-    # Technical Specs (For SQL Filtering)
-    capacity_gb = scrapy.Field()  # Integer (e.g., 32)
-    speed_mhz = scrapy.Field()  # Integer (e.g., 6000)
-    generation = scrapy.Field()  # 'DDR4' or 'DDR5'
-    latency = scrapy.Field()  # Integer '30' (CL30)
-    modules = scrapy.Field()  # Raw label, e.g., '2x16GB'
-    modules_count = scrapy.Field()  # Parsed integer count, e.g., 2
-    module_capacity_gb = scrapy.Field()  # Parsed per-module capacity, e.g., 16
-    system_of_usage = scrapy.Field()  # Raw label, e.g., 'PC' or 'Laptop'
-
-    # Store Info
-    availability = scrapy.Field()  # 'In Stock' or 'Out of Stock'
-    stock_quantity = scrapy.Field()  # Integer or None if unknown
-    stock_supplier = scrapy.Field()  # Integer or None if unknown
-    order_limit = scrapy.Field()  # Max units per order, if any
-
-    # Metadata & Links
-    url = scrapy.Field()  # Source link
+    # --- Listing Information (Store Specific) ---
+    store = scrapy.Field()
     sku = scrapy.Field()  # Store-specific ID
-    timestamp = scrapy.Field()  # When it was scraped
-    image_url = scrapy.Field()  # For visual reference
+    name = scrapy.Field()
+    url = scrapy.Field()
+    image_url = scrapy.Field()
+    modules = scrapy.Field()  # Raw label e.g., '2x16GB'
+
+    # --- Pricing Information ---
+    price = scrapy.Field()
+    price_per_gb = scrapy.Field()
+    currency = scrapy.Field()
+
+    # --- Inventory Information ---
+    availability = scrapy.Field()
+    stock_quantity = scrapy.Field()
+    stock_supplier = scrapy.Field()
+    order_limit = scrapy.Field()
+
+    # --- Metadata ---
+    timestamp = scrapy.Field()

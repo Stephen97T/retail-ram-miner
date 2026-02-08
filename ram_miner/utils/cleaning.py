@@ -1,12 +1,42 @@
-# Utilities for cleaning and normalizing scraped fields
-from __future__ import annotations
-
+import datetime
 import re
+from typing import Any
 
 MODULES_PATTERN = re.compile(r"(?P<count>\d+)\s*[xX]\s*(?P<capacity>\d+)")
 
 SYSTEM_DESKTOP = {"pc", "desktop", "tower"}
 SYSTEM_LAPTOP = {"laptop", "notebook", "ultrabook"}
+
+
+def clean_price(raw: str | None) -> float | None:
+    """Clean price string allowing for Dutch format (1.000,00) or standard float."""
+    if not raw:
+        return None
+
+    # Common cleanup
+    s = (
+        raw.replace("\u20ac", "")
+        .replace("€", "")
+        .replace(".-", "")
+        .replace(",-", "")
+        .strip()
+    )
+
+    # Detect check: if ',' in string, decimal separator in NL context.
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # If we see multiple dots, it is thousands separators.
+        if s.count(".") > 1:
+            s = s.replace(".", "")
+        elif "." in s:
+            # Single dot. Check if it looks like thousands or float.
+            pass
+
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def parse_modules(raw: str | None) -> tuple[int | None, int | None]:
@@ -46,3 +76,20 @@ def normalize_system(raw: str | None) -> str | None:
     if any(k in s for k in ("laptop", "notebook", "ultrabook")):
         return "laptop"
     return None
+
+
+def normalize_identifier(text: str | int | None) -> str | None:
+    """
+    Cleans MPNs and EANs to ensure they match between stores.
+    1. Integers become strings.
+    2. Whitespace stripped.
+    3. Converted to uppercase.
+    """
+    if not text:
+        return None
+    return str(text).strip().upper()
+
+
+def ensure_timestamp(item: dict[str, Any]) -> None:
+    if not item.get("timestamp"):
+        item["timestamp"] = datetime.datetime.now(datetime.UTC)

@@ -57,3 +57,8 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0
 
 # Logging
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+
+# Enable or disable pipelines
+ITEM_PIPELINES = {
+    "ram_miner.pipeline.SplitToTablesPipeline": 300,
+}

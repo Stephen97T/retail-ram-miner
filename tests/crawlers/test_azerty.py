@@ -8,7 +8,7 @@ from ram_miner.items import RamItem
 from ram_miner.spiders.crawlers.azerty import AzertySpider
 
 
-def fake_response_from_file(file_name, url=None):
+def fake_response_from_file(file_name: str, url: str) -> TextResponse:
     """Create a Scrapy fake HTTP response from a HTML file"""
     current_dir = Path("tests/crawlers/html")
     file_path = os.path.join(current_dir, "azerty", file_name)
@@ -27,10 +27,10 @@ def fake_response_from_file(file_name, url=None):
 
 class TestAzertySpider:
     @pytest.fixture
-    def spider(self):
+    def spider(self) -> AzertySpider:
         return AzertySpider()
 
-    def test_parse_product_links(self, spider):
+    def test_parse_product_links(self, spider: AzertySpider) -> None:
         """Test that the parse method extracts product links correctly."""
         response = fake_response_from_file(
             file_name="product_listing.html",
@@ -51,7 +51,7 @@ class TestAzertySpider:
             == "https://azerty.nl/product/kingston-fury-beast-black-geheugen/7347764"
         )
 
-    def test_parse_pagination(self, spider):
+    def test_parse_pagination(self, spider: AzertySpider) -> None:
         """Test that the parse method extracts pagination links correctly."""
         response = fake_response_from_file(
             file_name="product_listing.html",
@@ -69,7 +69,7 @@ class TestAzertySpider:
             pagination_requests[0].url == "https://azerty.nl/componenten/geheugen?p=2"
         )
 
-    def test_parse_product(self, spider):
+    def test_parse_product(self, spider: AzertySpider) -> None:
         """
         Test that parse_product extracts item details correctly.
         """
@@ -82,36 +82,34 @@ class TestAzertySpider:
         assert len(results) == 1
         item = results[0]
         assert isinstance(item, RamItem)
-        # Assertions for all fields
-        assert item["store"] == "Azerty"
-        assert item["name"] == "Corsair Vengeance RGB - Geheugen"
-        assert (
-            item["url"]
-            == "https://azerty.nl/product/corsair-vengeance-rgb-geheugen/9509576"
-        )
-        assert item["currency"] == "EUR"
-        assert item["price"] == 449.0
 
-        # Check missing fields
-        assert (
-            item["sku"] == "9509576"
-        )  # Assuming data-sku matches url id or present in form
+        expected_values = {
+            "store": "Azerty",
+            "name": "Corsair Vengeance RGB - Geheugen",
+            "url": "https://azerty.nl/product/corsair-vengeance-rgb-geheugen/9509576",
+            "currency": "EUR",
+            "price": 449.0,
+            "price_per_gb": 14.0312,
+            "sku": "9509576",
+            "mpn": "CMH32GX5M2F6000Z36",
+            "ean": "0840440419396",
+            "brand": "CORSAIR",
+            "capacity_gb": 32,
+            "clock_speed": 3000,
+            "transfer_speed": 6000,
+            "generation": "DDR5",
+            "latency": 36,
+            "modules": "2 x 16",
+            "modules_count": 2,
+            "module_capacity_gb": 16,
+            "system_of_usage": "desktop",
+            "availability": "In Stock",
+            "stock_quantity": 77,
+            "stock_supplier": None,
+            "image_url": "https://azerty.nl/media/catalog/product/K/n/Knipsel.jpg?quality=80&bg-color=255,255,255&fit=bounds&height=265&width=265&canvas=265:265",
+        }
 
-        # Specs
-        assert item["capacity_gb"] == 32
-        assert item["speed_mhz"] == 6000  # Should trigger on "Overdrachtssnelheid"
-        assert item["generation"] == "DDR5"
-        assert item["modules"] == "2 x 16"  # Matches "2 x 16" from table/cleaning logic
-        assert item["latency"] == 36
-        assert item["system_of_usage"] == "PC"  # If normalized, or check raw if not
+        for key, expected_value in expected_values.items():
+            assert item.get(key) == expected_value, f"Mismatch for field '{key}'"
 
-        # Availability - based on file content (I assume it's valid, but let's check field exists)
-        assert item.get("availability") == "In Stock"
-
-        # Metadata
-        assert item.get("sku") == "9509576"
-        assert (
-            item.get("image_url")
-            == "https://azerty.nl/media/catalog/product/K/n/Knipsel.jpg?quality=80&bg-color=255,255,255&fit=bounds&height=265&width=265&canvas=265:265"
-        )
         assert item.get("timestamp") is not None
