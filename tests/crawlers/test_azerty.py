@@ -106,6 +106,7 @@ class TestAzertySpider:
             "availability": "In Stock",
             "stock_quantity": 77,
             "stock_supplier": None,
+            "order_limit": 1,
             "image_url": "https://azerty.nl/media/catalog/product/K/n/Knipsel.jpg?quality=80&bg-color=255,255,255&fit=bounds&height=265&width=265&canvas=265:265",
         }
 
