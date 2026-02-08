@@ -5,7 +5,6 @@ def prepare_store_record(item: dict[str, Any], store_id: int) -> dict[str, Any]:
     return {
         "store_id": store_id,
         "store_name": item.get("store", "Unknown"),
-        "timestamp": item.get("timestamp"),
     }
 
 
