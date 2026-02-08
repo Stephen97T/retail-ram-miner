@@ -7,8 +7,8 @@ NEWSPIDER_MODULE = "ram_miner.spiders"
 
 # Environment Toggle
 # We use os.environ.get() directly.
-# Locally, you set these in your shell (e.g., $env:ENV_STATE="dev" in PowerShell)
-ENV_STATE = os.environ.get("ENV_STATE", "dev").lower()
+# Locally, you set these in your shell (e.g., $env:RUN_ENV="dev" in PowerShell)
+RUN_ENV = os.environ.get("RUN_ENV", "dev").lower()
 
 # Modern Engine Settings
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
@@ -22,28 +22,6 @@ ADDONS = {
 
 ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
 ZYTE_API_TRANSPARENT_MODE = True
-
-# Conditional Feed Export Logic
-if ENV_STATE == "prod":
-    # PRODUCTION: JSON to GCS
-    BUCKET = os.environ.get("GCS_BUCKET_NAME")
-    FEED_URI = f"gs://{BUCKET}/raw_data/%(name)s/%(time)s.json"
-    FEED_FORMAT = "json"
-else:
-    # DEVELOPMENT: CSV to local data folder
-    # Note: os.makedirs is safe to call even if 'data' exists
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    FEED_URI = "data/%(name)s/%(time)s.csv"
-    FEED_FORMAT = "csv"
-
-FEEDS = {
-    FEED_URI: {
-        "format": FEED_FORMAT,
-        "encoding": "utf8",
-        "store_empty": False,
-    }
-}
 
 # Crawl Behavior & Throttling
 ROBOTSTXT_OBEY = False
