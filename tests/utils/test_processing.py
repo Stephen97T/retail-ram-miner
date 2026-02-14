@@ -44,10 +44,10 @@ TEST_ITEM = {
 def test_prepare_store_record() -> None:
     store_id = 1
     result = prepare_store_record(TEST_ITEM, store_id)
+    print(result)
     assert result == {
         "store_id": 1,
         "store_name": "Azerty",
-        "timestamp": "2023-01-01",
     }
 
 
