@@ -1,20 +1,14 @@
 import json
 import os
-from datetime import UTC, datetime
 from typing import Any
 
 import scrapy
 from scrapy.crawler import Crawler
 
+import ram_miner.state as state
 from ram_miner.utils.cleaning import ensure_timestamp, normalize_identifier
-from ram_miner.utils.processing import (
-    prepare_brand_record,
-    prepare_hardware_record,
-    prepare_inventory_record,
-    prepare_listing_record,
-    prepare_pricing_record,
-    prepare_store_record,
-)
+from ram_miner.utils.extract import get_brand_id, get_store_id
+from ram_miner.utils.records import prepare_all_records
 
 
 class SplitToTablesPipeline:
@@ -24,124 +18,85 @@ class SplitToTablesPipeline:
         self.data_dir = ""
         self.seen_store_ids: set[int] = set()
         self.seen_brand_ids: set[int] = set()
+        self.seen_hardware_mpns: set[str] = set()
+        self.seen_listings: set[tuple[int, str]] = set()
+        self.latest_prices: dict[tuple[int, str], float | None] = {}
+        self.latest_inventory: dict[tuple[int, str], tuple[Any, ...]] = {}
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> "SplitToTablesPipeline":
         return cls(crawler)
 
-    def open_spider(self, spider: scrapy.Spider | None = None) -> None:
-        # Access spider through crawler since argument is deprecated
-        spider = self.crawler.spider or spider
+    def open_spider(self, *args: Any, **kwargs: Any) -> None:
+        spider = self.crawler.spider
+        if not spider and args:
+            spider = args[0]
         if not spider:
-            # Fallback (should not happen in normal Scrapy execution)
             return
-
         if self.run_env != "prod":
             self.data_dir = os.path.join("data", spider.name)
             os.makedirs(self.data_dir, exist_ok=True)
-            self._load_seen_ids()
+            self._load_state()
+
+    def _load_state(self) -> None:
+        loaded = state.load_state(
+            self.data_dir, self.crawler.spider.logger if self.crawler.spider else None
+        )
+        self.seen_store_ids = loaded["seen_store_ids"]
+        self.seen_brand_ids = loaded["seen_brand_ids"]
+        self.seen_hardware_mpns = loaded["seen_hardware_mpns"]
+        self.seen_listings = loaded["seen_listings"]
+        self.latest_prices = loaded["latest_prices"]
+        self.latest_inventory = loaded["latest_inventory"]
 
     def process_item(
-        self, item: dict[str, Any], spider: scrapy.Spider
+        self, item: dict[str, Any], *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
-        # Using spider from crawler is preferred
-        current_spider = self.crawler.spider or spider
-
+        spider = self.crawler.spider
+        if not spider and args:
+            spider = args[0]
+        if not spider:
+            raise ValueError("Spider is required for process_item")
         ensure_timestamp(item)
-
-        # --- NORMALIZATION STEP ---
-        clean_mpn = normalize_identifier(item.get("mpn"))
-        clean_ean = normalize_identifier(item.get("ean"))
-
-        if not clean_mpn:
-            current_spider.logger.warning(
-                f"Item {item.get('sku')} from {item.get('store')} has no MPN. Hardware specs cannot be consolidated."
-            )
-
-        # 1. Store Data
-        store_name = item.get("store", "Unknown")
-        store_id = self._get_store_id(store_name)
-        if store_id not in self.seen_store_ids:
-            store_record = prepare_store_record(item, store_id)
-            store_record["timestamp"] = datetime.now(UTC).isoformat()
-            self.seen_store_ids.add(store_id)
-        else:
-            store_record = {}
-
-        # 2. Brand Data
-        brand_name = item.get("brand", "Unknown")
-        brand_id = self._get_brand_id(brand_name)
-        if brand_id not in self.seen_brand_ids:
-            brand_record = prepare_brand_record(item, brand_id)
-            brand_record["timestamp"] = datetime.now(UTC).isoformat()
-            self.seen_brand_ids.add(brand_id)
-        else:
-            brand_record = {}
-
-        # 3. Hardware Specs
-        hardware_record = prepare_hardware_record(item, clean_mpn, clean_ean, brand_id)
-
-        # 4. Store Listing
-        listing_record = prepare_listing_record(item, store_id, clean_mpn)
-
-        # 5. Pricing Data
-        pricing_record = prepare_pricing_record(item, store_id)
-
-        # 6. Inventory Data
-        inventory_record = prepare_inventory_record(item, store_id)
-
-        # Dispatch based on environment
-        records = {
-            "stores": store_record,
-            "brands": brand_record,
-            "hardware": hardware_record,
-            "listings": listing_record,
-            "prices": pricing_record,
-            "inventory": inventory_record,
-        }
-
+        normalized = self._normalize_item(item)
+        records = self._prepare_records(item, normalized, spider)
         if self.run_env == "prod":
-            self._write_to_bigquery(records, current_spider)
+            self._write_to_bigquery(records, spider)
         else:
-            self._write_to_local(records, current_spider)
-
+            self._write_to_local(records, spider)
         return item
 
-    def _load_seen_ids(self) -> None:
-        """Loads existing IDs from local files to prevent duplicates across runs."""
-        # Load Stores
-        store_file = os.path.join(self.data_dir, "stores.jsonl")
-        if os.path.exists(store_file):
-            try:
-                with open(store_file, encoding="utf-8") as f:
-                    for line in f:
-                        if not line.strip():
-                            continue
-                        record = json.loads(line)
-                        if "store_id" in record:
-                            self.seen_store_ids.add(record["store_id"])
-            except Exception as e:
-                if self.crawler.spider:
-                    self.crawler.spider.logger.warning(
-                        f"Failed to load existing stores: {e}"
-                    )
+    def _normalize_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        mpn = normalize_identifier(item.get("mpn"))
+        if not mpn:
+            spider = self.crawler.spider
+            if spider and hasattr(spider, "logger"):
+                spider.logger.warning(
+                    f"Item {item.get('sku')} from {item.get('store')} has no MPN. Hardware specs cannot be consolidated."
+                )
+        return {
+            "mpn": mpn,
+            "ean": normalize_identifier(item.get("ean")),
+            "store_name": item.get("store", "Unknown"),
+            "brand_name": item.get("brand", "Unknown"),
+            "sku": str(item.get("sku")),
+        }
 
-        # Load Brands
-        brand_file = os.path.join(self.data_dir, "brands.jsonl")
-        if os.path.exists(brand_file):
-            try:
-                with open(brand_file, encoding="utf-8") as f:
-                    for line in f:
-                        if not line.strip():
-                            continue
-                        record = json.loads(line)
-                        if "brand_id" in record:
-                            self.seen_brand_ids.add(record["brand_id"])
-            except Exception as e:
-                if self.crawler.spider:
-                    self.crawler.spider.logger.warning(
-                        f"Failed to load existing brands: {e}"
-                    )
+    def _prepare_records(
+        self, item: dict[str, Any], normalized: dict[str, Any], spider: scrapy.Spider
+    ) -> dict[str, dict[str, Any]]:
+        return prepare_all_records(
+            item,
+            normalized,
+            self.seen_store_ids,
+            self.seen_brand_ids,
+            self.seen_hardware_mpns,
+            self.seen_listings,
+            self.latest_prices,
+            self.latest_inventory,
+            get_store_id,
+            get_brand_id,
+        )
 
     def _write_to_local(
         self, records: dict[str, dict[str, Any]], spider: scrapy.Spider
@@ -180,23 +135,3 @@ class SplitToTablesPipeline:
         #     errors = client.insert_rows_json(table_ref, [row])
         #     if errors:
         #         spider.logger.error(f"BQ Errors: {errors}")
-
-    def _get_store_id(self, store_name: str) -> int:
-        # You can replace this with a database lookup or dynamic generation
-        mapping = {
-            "Azerty": 1,
-            "Alternate": 2,
-            # Add others as needed
-        }
-        return mapping.get(store_name, 999)
-
-    def _get_brand_id(self, brand_name: str | None) -> int:
-        """
-        In production, this should query your 'brands' table:
-        SELECT id FROM brands WHERE name = %s (or INSERT and returning ID)
-        """
-        # For now, we perform a deterministic hash or mapping for demonstration
-        # This ensures "Corsair" always results in the same fake ID
-        if not brand_name:
-            return 0
-        return abs(hash(brand_name)) % 100000

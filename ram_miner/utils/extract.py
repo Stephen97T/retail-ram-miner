@@ -75,3 +75,18 @@ def extract_azerty_specs(response: Any) -> dict[str, Any]:
     specs["module_capacity_gb"] = module_cap
 
     return specs
+
+
+def get_store_id(store_name: str) -> int:
+    mapping = {
+        "Azerty": 1,
+        "Alternate": 2,
+        # Add others as needed
+    }
+    return mapping.get(store_name, 999)
+
+
+def get_brand_id(brand_name: str | None) -> int:
+    if not brand_name:
+        return 0
+    return abs(hash(brand_name)) % 100000

@@ -4,6 +4,8 @@ from ram_miner.utils.extract import (
     calculate_price_per_gb,
     extract_azerty_specs,
     extract_int,
+    get_brand_id,
+    get_store_id,
 )
 
 
@@ -110,3 +112,20 @@ def test_extract_azerty_specs() -> None:
 
     for key, expected in expected_values.items():
         assert result[key] == expected, f"Mismatch for field '{key}'"
+
+
+def test_get_store_id() -> None:
+    assert get_store_id("Azerty") == 1
+    assert get_store_id("Alternate") == 2
+    assert get_store_id("Unknown Store") == 999
+
+
+def test_get_brand_id() -> None:
+    id_corsair = get_brand_id("Corsair")
+    id_gskill = get_brand_id("G.Skill")
+    id_none = get_brand_id(None)
+
+    assert isinstance(id_corsair, int)
+    assert id_corsair > 0
+    assert id_corsair != id_gskill
+    assert id_none == 0
