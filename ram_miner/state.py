@@ -17,12 +17,12 @@ def load_lines(data_dir: str, filename: str) -> Iterator[dict[str, Any]]:
             pass
 
 
-def load_state(data_dir: str, logger=None) -> dict[str, Any]:
+def load_state(data_dir: str) -> dict[str, Any]:
     """
     Loads deduplication state from local files.
     Returns a dict with keys: seen_store_ids, seen_brand_ids, seen_hardware_mpns, seen_listings, latest_prices, latest_inventory
     """
-    state = {
+    state: dict[str, Any] = {
         "seen_store_ids": set(),
         "seen_brand_ids": set(),
         "seen_hardware_mpns": set(),

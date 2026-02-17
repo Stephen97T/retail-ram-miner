@@ -7,7 +7,6 @@ from scrapy.crawler import Crawler
 
 import ram_miner.state as state
 from ram_miner.utils.cleaning import ensure_timestamp, normalize_identifier
-from ram_miner.utils.extract import get_brand_id, get_store_id
 from ram_miner.utils.records import prepare_all_records
 
 
@@ -39,9 +38,7 @@ class SplitToTablesPipeline:
             self._load_state()
 
     def _load_state(self) -> None:
-        loaded = state.load_state(
-            self.data_dir, self.crawler.spider.logger if self.crawler.spider else None
-        )
+        loaded = state.load_state(self.data_dir)
         self.seen_store_ids = loaded["seen_store_ids"]
         self.seen_brand_ids = loaded["seen_brand_ids"]
         self.seen_hardware_mpns = loaded["seen_hardware_mpns"]
@@ -94,8 +91,6 @@ class SplitToTablesPipeline:
             self.seen_listings,
             self.latest_prices,
             self.latest_inventory,
-            get_store_id,
-            get_brand_id,
         )
 
     def _write_to_local(

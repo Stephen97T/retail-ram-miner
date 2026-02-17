@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from ram_miner.utils.extract import get_brand_id, get_store_id
 from ram_miner.utils.processing import (
     prepare_brand_record,
     prepare_hardware_record,
@@ -20,8 +21,6 @@ def prepare_all_records(
     seen_listings: set[tuple[int, str]],
     latest_prices: dict[tuple[int, str], float | None],
     latest_inventory: dict[tuple[int, str], tuple[Any, ...]],
-    get_store_id,
-    get_brand_id,
 ) -> dict[str, dict[str, Any]]:
     store_id = get_store_id(normalized["store_name"])
     brand_id = get_brand_id(normalized["brand_name"])
