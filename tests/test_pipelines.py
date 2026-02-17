@@ -210,8 +210,31 @@ class TestSplitToTablesPipeline:
         item = {"store": "Azerty", "brand": "Corsair"}
         pipeline.process_item(item, spider)
 
-        pipeline._write_to_bigquery.assert_called_once()
-        pipeline._write_to_local.assert_not_called()
+        # In prod, we still write to local first, bigquery is done on close
+        pipeline._write_to_local.assert_called_once()
+        pipeline._write_to_bigquery.assert_not_called()
+
+    def test_close_spider_prod(self, spider: MagicMock) -> None:
+        """Test close_spider triggers bigquery upload in prod."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings({"RUN_ENV": "prod"})
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline._write_to_bigquery = MagicMock()  # type: ignore[method-assign]
+
+        pipeline.close_spider(spider)
+        pipeline._write_to_bigquery.assert_called_once_with(spider)
+
+    def test_close_spider_dev(self, spider: MagicMock) -> None:
+        """Test close_spider does NOT trigger bigquery upload in dev."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings({"RUN_ENV": "dev"})
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline._write_to_bigquery = MagicMock()  # type: ignore[method-assign]
+
+        pipeline.close_spider(spider)
+        pipeline._write_to_bigquery.assert_not_called()
 
     def test_deduplication_loading(self, pipeline: SplitToTablesPipeline) -> None:
         """Test that existing IDs are loaded to prevent duplicates."""
@@ -283,8 +306,7 @@ class TestSplitToTablesPipeline:
         mock_client.load_table_from_file.return_value = mock_load_job
 
         # Execute
-        records = {"stores": {"id": 1}, "brands": {"id": 2}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Assertions
         mock_bigquery.Client.assert_called_once_with(project="test-project")
@@ -301,8 +323,7 @@ class TestSplitToTablesPipeline:
         crawler.spider = spider
         pipeline = SplitToTablesPipeline(crawler)
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should not attempt to create client
         mock_bigquery.Client.assert_not_called()
@@ -322,8 +343,7 @@ class TestSplitToTablesPipeline:
         # Mock client initialization to raise an error
         mock_bigquery.Client.side_effect = Exception("Authentication failed")
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should log error
         spider.logger.error.assert_called_with(
@@ -354,8 +374,7 @@ class TestSplitToTablesPipeline:
         mock_client = MagicMock()
         mock_bigquery.Client.return_value = mock_client
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should not attempt to load
         mock_client.load_table_from_file.assert_not_called()
@@ -391,8 +410,7 @@ class TestSplitToTablesPipeline:
         mock_client = MagicMock()
         mock_bigquery.Client.return_value = mock_client
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should not attempt to load
         mock_client.load_table_from_file.assert_not_called()
@@ -432,8 +450,7 @@ class TestSplitToTablesPipeline:
         mock_bigquery.Client.return_value = mock_client
         mock_client.load_table_from_file.side_effect = Exception("Schema mismatch")
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should log error
         spider.logger.error.assert_called_with(
@@ -477,8 +494,7 @@ class TestSplitToTablesPipeline:
         mock_load_job.output_rows = 10
         mock_client.load_table_from_file.return_value = mock_load_job
 
-        records = {"stores": {"id": 1}, "brands": {"id": 2}, "hardware": {"id": 3}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Should call load_table_from_file 3 times
         assert mock_client.load_table_from_file.call_count == 3
@@ -520,8 +536,7 @@ class TestSplitToTablesPipeline:
         mock_load_job.output_rows = 5
         mock_client.load_table_from_file.return_value = mock_load_job
 
-        records = {"stores": {"id": 1}}
-        pipeline._write_to_bigquery(records, spider)
+        pipeline._write_to_bigquery(spider)
 
         # Verify LoadJobConfig was created with correct parameters
         mock_bigquery.LoadJobConfig.assert_called_once()
@@ -534,4 +549,5 @@ class TestSplitToTablesPipeline:
             call_kwargs["write_disposition"]
             == mock_bigquery.WriteDisposition.WRITE_APPEND
         )
-        assert call_kwargs["autodetect"] is False
+        # Update assertion to match implementation
+        assert call_kwargs["autodetect"] is True

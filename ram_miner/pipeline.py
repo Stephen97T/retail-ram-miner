@@ -37,6 +37,10 @@ class SplitToTablesPipeline:
         os.makedirs(self.data_dir, exist_ok=True)
         self._load_state()
 
+    def close_spider(self, spider: scrapy.Spider) -> None:
+        if self.run_env == "prod":
+            self._write_to_bigquery(spider)
+
     def _load_state(self) -> None:
         loaded = state.load_state(self.data_dir)
         self.seen_store_ids = loaded["seen_store_ids"]
@@ -57,10 +61,7 @@ class SplitToTablesPipeline:
         ensure_timestamp(item)
         normalized = self._normalize_item(item)
         records = self._prepare_records(item, normalized, spider)
-        if self.run_env == "prod":
-            self._write_to_bigquery(records, spider)
-        else:
-            self._write_to_local(records, spider)
+        self._write_to_local(records, spider)
         return item
 
     def _normalize_item(self, item: dict[str, Any]) -> dict[str, Any]:
@@ -113,9 +114,7 @@ class SplitToTablesPipeline:
             except Exception as e:
                 spider.logger.error(f"Failed to write to {table_name}.jsonl: {e}")
 
-    def _write_to_bigquery(
-        self, records: dict[str, dict[str, Any]], spider: scrapy.Spider
-    ) -> None:
+    def _write_to_bigquery(self, spider: scrapy.Spider) -> None:
         """
         Bulk insert JSONL files to Google BigQuery.
         Reads from ./data/{spider_name}/*.jsonl and loads into BigQuery tables.
@@ -124,7 +123,7 @@ class SplitToTablesPipeline:
         project_id = self.crawler.settings.get("GCP_PROJECT_ID")
         dataset_id = self.crawler.settings.get("GCP_DATASET_ID", "retail_ram_data")
 
-        for id in [project_id,dataset_id]:
+        for id in [project_id, dataset_id]:
             if not id:
                 spider.logger.error(f"Missing required BigQuery configuration: {id}")
                 return
@@ -161,7 +160,8 @@ class SplitToTablesPipeline:
                 job_config = bigquery.LoadJobConfig(
                     source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                     write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-                    autodetect=False,  # Use existing table schema
+                    autodetect=True,
+                    create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
                 )
 
                 # Load data from JSONL file
