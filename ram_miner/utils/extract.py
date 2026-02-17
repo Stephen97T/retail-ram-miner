@@ -1,4 +1,5 @@
 import re
+import zlib
 from typing import Any
 
 from ram_miner.utils.cleaning import normalize_system, parse_modules
@@ -89,4 +90,4 @@ def get_store_id(store_name: str) -> int:
 def get_brand_id(brand_name: str | None) -> int:
     if not brand_name:
         return 0
-    return abs(hash(brand_name)) % 100000
+    return zlib.crc32(brand_name.encode("utf-8")) % 100000

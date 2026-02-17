@@ -129,3 +129,7 @@ def test_get_brand_id() -> None:
     assert id_corsair > 0
     assert id_corsair != id_gskill
     assert id_none == 0
+
+    # Determinism check
+    id_corsair_2 = get_brand_id("Corsair")
+    assert id_corsair == id_corsair_2
