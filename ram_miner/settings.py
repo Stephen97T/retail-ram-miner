@@ -36,6 +36,22 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0
 # Logging
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
+# Google Cloud Platform / BigQuery Configuration
+GOOGLE_APPLICATION_CREDENTIALS = os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS"
+)  # Path to service account JSON key
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+GCP_DATASET_ID = os.environ.get("GCP_DATASET_ID", "retail_ram_data")
+BIGQUERY_TABLE_NAMES = [
+    "stores",
+    "brands",
+    "hardware",
+    "listings",
+    "prices",
+    "inventory",
+]
+# Note: GOOGLE_APPLICATION_CREDENTIALS env var should point to your service account JSON key file
+
 # Enable or disable pipelines
 ITEM_PIPELINES = {
     "ram_miner.pipeline.SplitToTablesPipeline": 300,

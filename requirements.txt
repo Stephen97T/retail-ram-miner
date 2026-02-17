@@ -8,6 +8,7 @@ zyte-api==0.8.1
 
 # utilities
 pandas==2.3.2
+google-cloud-bigquery==3.29.0
 
 # testing
 pytest==8.3.5

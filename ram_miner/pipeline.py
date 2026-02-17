@@ -3,6 +3,7 @@ import os
 from typing import Any
 
 import scrapy
+from google.cloud import bigquery
 from scrapy.crawler import Crawler
 
 import ram_miner.state as state
@@ -32,10 +33,9 @@ class SplitToTablesPipeline:
             spider = args[0]
         if not spider:
             return
-        if self.run_env != "prod":
-            self.data_dir = os.path.join("data", spider.name)
-            os.makedirs(self.data_dir, exist_ok=True)
-            self._load_state()
+        self.data_dir = os.path.join("data", spider.name)
+        os.makedirs(self.data_dir, exist_ok=True)
+        self._load_state()
 
     def _load_state(self) -> None:
         loaded = state.load_state(self.data_dir)
@@ -117,16 +117,60 @@ class SplitToTablesPipeline:
         self, records: dict[str, dict[str, Any]], spider: scrapy.Spider
     ) -> None:
         """
-        Placeholder for Google BigQuery insertion.
-        Requires 'google-cloud-bigquery' package and credentials.
+        Bulk insert JSONL files to Google BigQuery.
+        Reads from ./data/{spider_name}/*.jsonl and loads into BigQuery tables.
+        Requires 'google-cloud-bigquery' package and GOOGLE_APPLICATION_CREDENTIALS env var.
         """
-        spider.logger.info(
-            f"Prod mode: Would insert {list(records.keys())} into BigQuery."
+        project_id = self.crawler.settings.get("GCP_PROJECT_ID")
+        dataset_id = self.crawler.settings.get("GCP_DATASET_ID", "retail_ram_data")
+
+        # Initialize BigQuery client
+        try:
+            client = bigquery.Client(project=project_id)
+        except Exception as e:
+            spider.logger.error(f"Failed to initialize BigQuery client: {e}")
+            return
+
+        # Get table names from settings
+        table_names = self.crawler.settings.getlist(
+            "BIGQUERY_TABLE_NAMES",
         )
-        # Example implementation:
-        # client = bigquery.Client()
-        # for table_id, row in records.items():
-        #     table_ref = client.dataset("your_dataset").table(table_id)
-        #     errors = client.insert_rows_json(table_ref, [row])
-        #     if errors:
-        #         spider.logger.error(f"BQ Errors: {errors}")
+
+        # Upload each JSONL file to its corresponding BigQuery table
+        for table_name in table_names:
+            jsonl_file = os.path.join(self.data_dir, f"{table_name}.jsonl")
+
+            if not os.path.exists(jsonl_file):
+                spider.logger.debug(f"No {table_name}.jsonl file found, skipping")
+                continue
+
+            # Check if file is empty
+            if os.path.getsize(jsonl_file) == 0:
+                spider.logger.debug(f"{table_name}.jsonl is empty, skipping")
+                continue
+
+            table_id = f"{project_id}.{dataset_id}.{table_name}"
+
+            try:
+                # Configure the load job
+                job_config = bigquery.LoadJobConfig(
+                    source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                    autodetect=False,  # Use existing table schema
+                )
+
+                # Load data from JSONL file
+                with open(jsonl_file, "rb") as source_file:
+                    load_job = client.load_table_from_file(
+                        source_file, table_id, job_config=job_config
+                    )
+
+                # Wait for the job to complete
+                load_job.result()
+
+                spider.logger.info(
+                    f"Loaded {load_job.output_rows} rows into {table_id}"
+                )
+
+            except Exception as e:
+                spider.logger.error(f"Failed to load {table_name} to BigQuery: {e}")
