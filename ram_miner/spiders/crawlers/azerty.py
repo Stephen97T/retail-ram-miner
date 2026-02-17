@@ -20,6 +20,13 @@ class AzertySpider(scrapy.Spider):
     allowed_domains = ["azerty.nl"]
     start_urls = ["https://azerty.nl/componenten/geheugen"]
 
+    custom_settings = {
+        "AUTOTHROTTLE_ENABLED": False,
+        "CONCURRENT_REQUESTS": 6,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 6,
+        "DOWNLOAD_DELAY": 0.5,
+    }
+
     def parse(self, response: Response) -> Generator[scrapy.Request, None, None]:
         """
         Parse listing pages used to discover RAM products.
