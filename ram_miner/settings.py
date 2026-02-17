@@ -41,7 +41,7 @@ GOOGLE_APPLICATION_CREDENTIALS = os.environ.get(
     "GOOGLE_APPLICATION_CREDENTIALS"
 )  # Path to service account JSON key
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-GCP_DATASET_ID = os.environ.get("GCP_DATASET_ID", "retail_ram_data")
+GCP_DATASET_ID = os.environ.get("GCP_DATASET_ID")
 BIGQUERY_TABLE_NAMES = [
     "stores",
     "brands",

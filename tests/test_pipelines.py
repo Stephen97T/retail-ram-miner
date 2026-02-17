@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -22,7 +21,7 @@ class TestSplitToTablesPipeline:
     @pytest.fixture
     def spider(self) -> MagicMock:
         spider = MagicMock()
-        spider.logger = logging.getLogger("test_spider")
+        spider.logger = MagicMock()  # Mock logger for assertions
         spider.name = "test_spider"
         return spider
 
@@ -61,13 +60,16 @@ class TestSplitToTablesPipeline:
         self,
         pipeline: SplitToTablesPipeline,
         spider: MagicMock,
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """
         Test that missing MPN triggers a warning but continues processing.
         """
         # Ensure the pipeline's crawler has this spider set
         pipeline.crawler.spider = spider
+        pipeline.data_dir = "test_data"  # Set data_dir to avoid warning
+        # Mock write methods to prevent actual file operations
+        pipeline._write_to_local = MagicMock()  # type: ignore[method-assign]
+
         item = {
             "store": "Azerty",
             "brand": "Corsair",
@@ -75,10 +77,12 @@ class TestSplitToTablesPipeline:
             "mpn": None,  # Missing MPN
         }
 
-        with caplog.at_level(logging.WARNING, logger="test_spider"):
-            pipeline.process_item(item, spider)
+        pipeline.process_item(item, spider)
 
-        assert "no MPN" in caplog.text
+        # Check that warning was logged
+        spider.logger.warning.assert_called()
+        call_args = str(spider.logger.warning.call_args)
+        assert "no MPN" in call_args
 
     def test_get_store_id(self, pipeline: SplitToTablesPipeline) -> None:
         pass
@@ -120,7 +124,7 @@ class TestSplitToTablesPipeline:
             # However, open now calls _load_seen_ids.
 
     def test_open_spider_prod(self, spider: MagicMock) -> None:
-        """Test that open_spider does not create directory in prod env."""
+        """Test that open_spider creates directory even in prod env (for JSONL staging)."""
         crawler = MagicMock(spec=Crawler)
         crawler.settings = Settings({"RUN_ENV": "prod"})
         crawler.spider = spider
@@ -130,8 +134,10 @@ class TestSplitToTablesPipeline:
 
         with patch("os.makedirs") as mock_makedirs:
             pipeline.open_spider()
-            mock_makedirs.assert_not_called()
-            assert pipeline.data_dir == ""
+            # Directory is always created (even in prod) for JSONL staging
+            expected_path = os.path.join("data", "azerty")
+            mock_makedirs.assert_called_once_with(expected_path, exist_ok=True)
+            assert pipeline.data_dir == expected_path
 
     def test_write_to_local(self, spider: MagicMock) -> None:
         """Test writing records to local JSONL files."""
@@ -237,3 +243,295 @@ class TestSplitToTablesPipeline:
         import shutil
 
         shutil.rmtree(pipeline.data_dir)
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    @patch("os.path.getsize")
+    @patch("builtins.open", new_callable=mock_open, read_data=b'{"test": "data"}')
+    def test_write_to_bigquery_success(
+        self,
+        mock_file: MagicMock,
+        mock_getsize: MagicMock,
+        mock_exists: MagicMock,
+        mock_bigquery: MagicMock,
+        spider: MagicMock,
+    ) -> None:
+        """Test successful BigQuery upload."""
+        # Setup
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_DATASET_ID": "test_dataset",
+                "BIGQUERY_TABLE_NAMES": ["stores", "brands"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file system
+        mock_exists.return_value = True
+        mock_getsize.return_value = 100  # Non-empty file
+
+        # Mock BigQuery client and job
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+        mock_load_job = MagicMock()
+        mock_load_job.output_rows = 5
+        mock_client.load_table_from_file.return_value = mock_load_job
+
+        # Execute
+        records = {"stores": {"id": 1}, "brands": {"id": 2}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Assertions
+        mock_bigquery.Client.assert_called_once_with(project="test-project")
+        assert mock_client.load_table_from_file.call_count == 2
+        mock_load_job.result.assert_called()
+
+    @patch("ram_miner.pipeline.bigquery")
+    def test_write_to_bigquery_missing_project_id(
+        self, mock_bigquery: MagicMock, spider: MagicMock
+    ) -> None:
+        """Test that missing GCP_PROJECT_ID is handled gracefully."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings({"RUN_ENV": "prod"})  # No GCP_PROJECT_ID
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should not attempt to create client
+        mock_bigquery.Client.assert_not_called()
+
+    @patch("ram_miner.pipeline.bigquery")
+    def test_write_to_bigquery_client_initialization_error(
+        self, mock_bigquery: MagicMock, spider: MagicMock
+    ) -> None:
+        """Test handling of BigQuery client initialization errors."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {"RUN_ENV": "prod", "GCP_PROJECT_ID": "test-project"}
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+
+        # Mock client initialization to raise an error
+        mock_bigquery.Client.side_effect = Exception("Authentication failed")
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should log error
+        spider.logger.error.assert_called_with(
+            "Failed to initialize BigQuery client: Authentication failed"
+        )
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    def test_write_to_bigquery_missing_file(
+        self, mock_exists: MagicMock, mock_bigquery: MagicMock, spider: MagicMock
+    ) -> None:
+        """Test that missing JSONL files are skipped."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "BIGQUERY_TABLE_NAMES": ["stores"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file doesn't exist
+        mock_exists.return_value = False
+
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should not attempt to load
+        mock_client.load_table_from_file.assert_not_called()
+        spider.logger.debug.assert_called_with("No stores.jsonl file found, skipping")
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    @patch("os.path.getsize")
+    def test_write_to_bigquery_empty_file(
+        self,
+        mock_getsize: MagicMock,
+        mock_exists: MagicMock,
+        mock_bigquery: MagicMock,
+        spider: MagicMock,
+    ) -> None:
+        """Test that empty JSONL files are skipped."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "BIGQUERY_TABLE_NAMES": ["stores"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file exists but is empty
+        mock_exists.return_value = True
+        mock_getsize.return_value = 0
+
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should not attempt to load
+        mock_client.load_table_from_file.assert_not_called()
+        spider.logger.debug.assert_called_with("stores.jsonl is empty, skipping")
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    @patch("os.path.getsize")
+    @patch("builtins.open", new_callable=mock_open, read_data=b'{"test": "data"}')
+    def test_write_to_bigquery_load_error(
+        self,
+        mock_file: MagicMock,
+        mock_getsize: MagicMock,
+        mock_exists: MagicMock,
+        mock_bigquery: MagicMock,
+        spider: MagicMock,
+    ) -> None:
+        """Test handling of errors during BigQuery load."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "BIGQUERY_TABLE_NAMES": ["stores"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file system
+        mock_exists.return_value = True
+        mock_getsize.return_value = 100
+
+        # Mock BigQuery client to raise error during load
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+        mock_client.load_table_from_file.side_effect = Exception("Schema mismatch")
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should log error
+        spider.logger.error.assert_called_with(
+            "Failed to load stores to BigQuery: Schema mismatch"
+        )
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    @patch("os.path.getsize")
+    @patch("builtins.open", new_callable=mock_open, read_data=b'{"test": "data"}')
+    def test_write_to_bigquery_multiple_tables(
+        self,
+        mock_file: MagicMock,
+        mock_getsize: MagicMock,
+        mock_exists: MagicMock,
+        mock_bigquery: MagicMock,
+        spider: MagicMock,
+    ) -> None:
+        """Test uploading multiple tables to BigQuery."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "GCP_DATASET_ID": "test_dataset",
+                "BIGQUERY_TABLE_NAMES": ["stores", "brands", "hardware"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file system
+        mock_exists.return_value = True
+        mock_getsize.return_value = 100
+
+        # Mock BigQuery client
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+        mock_load_job = MagicMock()
+        mock_load_job.output_rows = 10
+        mock_client.load_table_from_file.return_value = mock_load_job
+
+        records = {"stores": {"id": 1}, "brands": {"id": 2}, "hardware": {"id": 3}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Should call load_table_from_file 3 times
+        assert mock_client.load_table_from_file.call_count == 3
+        assert mock_load_job.result.call_count == 3
+
+    @patch("ram_miner.pipeline.bigquery")
+    @patch("os.path.exists")
+    @patch("os.path.getsize")
+    @patch("builtins.open", new_callable=mock_open, read_data=b'{"test": "data"}')
+    def test_write_to_bigquery_job_config(
+        self,
+        mock_file: MagicMock,
+        mock_getsize: MagicMock,
+        mock_exists: MagicMock,
+        mock_bigquery: MagicMock,
+        spider: MagicMock,
+    ) -> None:
+        """Test that BigQuery job config is set correctly."""
+        crawler = MagicMock(spec=Crawler)
+        crawler.settings = Settings(
+            {
+                "RUN_ENV": "prod",
+                "GCP_PROJECT_ID": "test-project",
+                "BIGQUERY_TABLE_NAMES": ["stores"],
+            }
+        )
+        crawler.spider = spider
+        pipeline = SplitToTablesPipeline(crawler)
+        pipeline.data_dir = "data/test_spider"
+
+        # Mock file system
+        mock_exists.return_value = True
+        mock_getsize.return_value = 100
+
+        # Mock BigQuery components
+        mock_client = MagicMock()
+        mock_bigquery.Client.return_value = mock_client
+        mock_load_job = MagicMock()
+        mock_load_job.output_rows = 5
+        mock_client.load_table_from_file.return_value = mock_load_job
+
+        records = {"stores": {"id": 1}}
+        pipeline._write_to_bigquery(records, spider)
+
+        # Verify LoadJobConfig was created with correct parameters
+        mock_bigquery.LoadJobConfig.assert_called_once()
+        call_kwargs = mock_bigquery.LoadJobConfig.call_args.kwargs
+        assert (
+            call_kwargs["source_format"]
+            == mock_bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
+        )
+        assert (
+            call_kwargs["write_disposition"]
+            == mock_bigquery.WriteDisposition.WRITE_APPEND
+        )
+        assert call_kwargs["autodetect"] is False

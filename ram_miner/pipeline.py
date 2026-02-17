@@ -124,6 +124,11 @@ class SplitToTablesPipeline:
         project_id = self.crawler.settings.get("GCP_PROJECT_ID")
         dataset_id = self.crawler.settings.get("GCP_DATASET_ID", "retail_ram_data")
 
+        for id in [project_id,dataset_id]:
+            if not id:
+                spider.logger.error(f"Missing required BigQuery configuration: {id}")
+                return
+
         # Initialize BigQuery client
         try:
             client = bigquery.Client(project=project_id)
