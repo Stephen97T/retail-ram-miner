@@ -20,8 +20,6 @@ class SplitToTablesPipeline:
         self.seen_brand_ids: set[int] = set()
         self.seen_hardware_mpns: set[str] = set()
         self.seen_listings: set[tuple[int, str]] = set()
-        self.latest_prices: dict[tuple[int, str], float | None] = {}
-        self.latest_inventory: dict[tuple[int, str], tuple[Any, ...]] = {}
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> "SplitToTablesPipeline":
@@ -47,8 +45,6 @@ class SplitToTablesPipeline:
         self.seen_brand_ids = loaded["seen_brand_ids"]
         self.seen_hardware_mpns = loaded["seen_hardware_mpns"]
         self.seen_listings = loaded["seen_listings"]
-        self.latest_prices = loaded["latest_prices"]
-        self.latest_inventory = loaded["latest_inventory"]
 
     def process_item(
         self, item: dict[str, Any], *args: Any, **kwargs: Any
@@ -90,8 +86,6 @@ class SplitToTablesPipeline:
             self.seen_brand_ids,
             self.seen_hardware_mpns,
             self.seen_listings,
-            self.latest_prices,
-            self.latest_inventory,
         )
 
     def _write_to_local(

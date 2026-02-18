@@ -1,5 +1,5 @@
-import json
 import os
+from typing import Any
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -236,36 +236,35 @@ class TestSplitToTablesPipeline:
         pipeline.close_spider(spider)
         pipeline._write_to_bigquery.assert_not_called()
 
-    def test_deduplication_loading(self, pipeline: SplitToTablesPipeline) -> None:
+    @patch("ram_miner.state.load_lines")
+    def test_deduplication_loading(
+        self, mock_load_lines: MagicMock, pipeline: SplitToTablesPipeline
+    ) -> None:
         """Test that existing IDs are loaded to prevent duplicates."""
         pipeline.data_dir = "tests/data_mock"
-        os.makedirs(pipeline.data_dir, exist_ok=True)
 
-        # Create dummy store file
-        with open(os.path.join(pipeline.data_dir, "stores.jsonl"), "w") as f:
-            f.write(json.dumps({"store_id": 1, "store_name": "TestStore"}) + "\n")
+        # Define side effects for load_lines based on filename
+        def load_lines_side_effect(
+            data_dir: str, filename: str
+        ) -> list[dict[str, Any] | None]:
+            if filename == "stores.jsonl":
+                return [{"store_id": 1, "store_name": "TestStore"}]
+            elif filename == "brands.jsonl":
+                return [{"brand_id": 100, "brand_name": "TestBrand"}]
+            elif filename == "hardware.jsonl":
+                return [{"mpn": "MPN1"}]
+            elif filename == "listings.jsonl":
+                return [{"store_id": 1, "store_sku": "SKU1"}]
+            return []
 
-        # Create dummy brand file
-        with open(os.path.join(pipeline.data_dir, "brands.jsonl"), "w") as f:
-            f.write(json.dumps({"brand_id": 100, "brand_name": "TestBrand"}) + "\n")
-
-        # Create dummy price file
-        with open(os.path.join(pipeline.data_dir, "prices.jsonl"), "w") as f:
-            f.write(
-                json.dumps({"store_id": 1, "store_sku": "SKU1", "price": 99.9}) + "\n"
-            )
+        mock_load_lines.side_effect = load_lines_side_effect
 
         pipeline._load_state()
 
         assert 1 in pipeline.seen_store_ids
         assert 100 in pipeline.seen_brand_ids
-        assert (1, "SKU1") in pipeline.latest_prices
-        assert pipeline.latest_prices[(1, "SKU1")] == 99.9
-
-        # Cleanup
-        import shutil
-
-        shutil.rmtree(pipeline.data_dir)
+        assert "MPN1" in pipeline.seen_hardware_mpns
+        assert (1, "SKU1") in pipeline.seen_listings
 
     @patch("ram_miner.pipeline.bigquery")
     @patch("os.path.exists")

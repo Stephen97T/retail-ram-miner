@@ -64,8 +64,6 @@ def test_prepare_all_records_new_items(mock_dependencies: dict[str, MagicMock]) 
     seen_brand_ids: set[int] = set()
     seen_hardware_mpns: set[str] = set()
     seen_listings: set[tuple[int, str]] = set()
-    latest_prices: dict[tuple[int, str], float | None] = {}
-    latest_inventory: dict[tuple[int, str], tuple[Any, ...]] = {}
 
     # Execute
     result = prepare_all_records(
@@ -75,8 +73,6 @@ def test_prepare_all_records_new_items(mock_dependencies: dict[str, MagicMock]) 
         seen_brand_ids,
         seen_hardware_mpns,
         seen_listings,
-        latest_prices,
-        latest_inventory,
     )
 
     # Assertions
@@ -92,8 +88,6 @@ def test_prepare_all_records_new_items(mock_dependencies: dict[str, MagicMock]) 
     assert 10 in seen_brand_ids
     assert "MPN1" in seen_hardware_mpns
     assert (1, "SKU1") in seen_listings
-    assert latest_prices[(1, "SKU1")] == 100.0
-    assert latest_inventory[(1, "SKU1")] == (5, 10, "In Stock")
 
 
 def test_prepare_all_records_deduplication(
@@ -103,7 +97,7 @@ def test_prepare_all_records_deduplication(
     mock_dependencies["get_store_id"].return_value = 1
     mock_dependencies["get_brand_id"].return_value = 10
 
-    # Pricing/Inventory should still change if different
+    # Pricing/Inventory should always return
     mock_dependencies["prepare_pricing"].return_value = {"price": 100.0}
     mock_dependencies["prepare_inventory"].return_value = {
         "stock_store": 5,
@@ -124,8 +118,6 @@ def test_prepare_all_records_deduplication(
     seen_brand_ids = {10}
     seen_hardware_mpns = {"MPN1"}
     seen_listings = {(1, "SKU1")}
-    latest_prices: dict[tuple[int, str], Any] = {(1, "SKU1"): 100.0}
-    latest_inventory: dict[tuple[int, str], Any] = {(1, "SKU1"): (5, 10, "In Stock")}
 
     # Execute
     result = prepare_all_records(
@@ -135,18 +127,20 @@ def test_prepare_all_records_deduplication(
         seen_brand_ids,
         seen_hardware_mpns,
         seen_listings,
-        latest_prices,
-        latest_inventory,
     )
 
-    # Assertions - everything should be empty/skipped except updates if changed
+    # Assertions - everything should be empty/skipped for static data
     assert result["stores"] == {}
     assert result["brands"] == {}
     assert result["hardware"] == {}
     assert result["listings"] == {}
-    # Price and inventory match existing state, so should return empty
-    assert result["prices"] == {}
-    assert result["inventory"] == {}
+    # Price and inventory should always return regardless of previous state
+    assert result["prices"] == {"price": 100.0}
+    assert result["inventory"] == {
+        "stock_store": 5,
+        "stock_supplier": 10,
+        "availability": "In Stock",
+    }
 
 
 def test_prepare_all_records_price_update(
@@ -177,8 +171,6 @@ def test_prepare_all_records_price_update(
     seen_brand_ids = {10}
     seen_hardware_mpns = {"MPN1"}
     seen_listings = {(1, "SKU1")}
-    latest_prices: dict[tuple[int, str], Any] = {(1, "SKU1"): 100.0}  # Old price
-    latest_inventory: dict[tuple[int, str], Any] = {(1, "SKU1"): (5, 10, "In Stock")}
 
     # Execute
     result = prepare_all_records(
@@ -188,14 +180,16 @@ def test_prepare_all_records_price_update(
         seen_brand_ids,
         seen_hardware_mpns,
         seen_listings,
-        latest_prices,
-        latest_inventory,
     )
 
     # Assertions
     assert result["prices"]["price"] == 120.0
-    assert latest_prices[(1, "SKU1")] == 120.0
-    assert result["inventory"] == {}  # Inventory didn't change
+    # Inventory is always returned now
+    assert result["inventory"] == {
+        "stock_store": 5,
+        "stock_supplier": 10,
+        "availability": "In Stock",
+    }
 
 
 def test_prepare_all_records_inventory_update(
@@ -226,10 +220,6 @@ def test_prepare_all_records_inventory_update(
     seen_brand_ids = {10}
     seen_hardware_mpns = {"MPN1"}
     seen_listings = {(1, "SKU1")}
-    latest_prices: dict[tuple[int, str], Any] = {(1, "SKU1"): 100.0}
-    latest_inventory: dict[tuple[int, str], Any] = {
-        (1, "SKU1"): (5, 10, "In Stock")
-    }  # Old State
 
     # Execute
     result = prepare_all_records(
@@ -239,14 +229,9 @@ def test_prepare_all_records_inventory_update(
         seen_brand_ids,
         seen_hardware_mpns,
         seen_listings,
-        latest_prices,
-        latest_inventory,
     )
 
     # Assertions
-    assert result["prices"] == {}  # Price didn't change
+    assert result["prices"] == {"price": 100.0}  # Price always returned
     assert result["inventory"]["stock_store"] == 0
     assert result["inventory"]["availability"] == "Out of Stock"
-
-    # Check state update
-    assert latest_inventory[(1, "SKU1")] == (0, 10, "Out of Stock")

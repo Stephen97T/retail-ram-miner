@@ -65,36 +65,15 @@ def _process_listing_record(
 def _process_pricing_record(
     item: dict[str, Any],
     store_id: int,
-    listing_key: tuple[int, str],
-    latest_prices: dict[tuple[int, str], float | None],
 ) -> dict[str, Any]:
-    record = prepare_pricing_record(item, store_id)
-    new_price = record.get("price")
-    if listing_key not in latest_prices or latest_prices.get(listing_key) != new_price:
-        latest_prices[listing_key] = new_price
-        return record
-    return {}
+    return prepare_pricing_record(item, store_id)
 
 
 def _process_inventory_record(
     item: dict[str, Any],
     store_id: int,
-    listing_key: tuple[int, str],
-    latest_inventory: dict[tuple[int, str], tuple[Any, ...]],
 ) -> dict[str, Any]:
-    record = prepare_inventory_record(item, store_id)
-    new_inv_state = (
-        record.get("stock_store"),
-        record.get("stock_supplier"),
-        record.get("availability"),
-    )
-    if (
-        listing_key not in latest_inventory
-        or latest_inventory.get(listing_key) != new_inv_state
-    ):
-        latest_inventory[listing_key] = new_inv_state
-        return record
-    return {}
+    return prepare_inventory_record(item, store_id)
 
 
 def prepare_all_records(
@@ -104,8 +83,6 @@ def prepare_all_records(
     seen_brand_ids: set[int],
     seen_hardware_mpns: set[str],
     seen_listings: set[tuple[int, str]],
-    latest_prices: dict[tuple[int, str], float | None],
-    latest_inventory: dict[tuple[int, str], tuple[Any, ...]],
 ) -> dict[str, dict[str, Any]]:
     store_id = get_store_id(normalized["store_name"])
     brand_id = get_brand_id(normalized["brand_name"])
@@ -123,8 +100,6 @@ def prepare_all_records(
         "listings": _process_listing_record(
             item, store_id, clean_mpn, listing_key, seen_listings
         ),
-        "prices": _process_pricing_record(item, store_id, listing_key, latest_prices),
-        "inventory": _process_inventory_record(
-            item, store_id, listing_key, latest_inventory
-        ),
+        "prices": _process_pricing_record(item, store_id),
+        "inventory": _process_inventory_record(item, store_id),
     }
