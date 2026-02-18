@@ -21,6 +21,12 @@ files = [
     "tests",
 ]
 
+[[tool.mypy.overrides]]
+module = "google.cloud.*"
+ignore_missing_imports = true
+# Suppress "import-untyped" specifically for google-cloud packages
+disable_error_code = ["import-untyped"]
+
 # Pytest: Asyncio configuration for Scrapy 2.14
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
