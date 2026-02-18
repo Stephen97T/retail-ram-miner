@@ -8,30 +8,32 @@ SYSTEM_DESKTOP = {"pc", "desktop", "tower"}
 SYSTEM_LAPTOP = {"laptop", "notebook", "ultrabook"}
 
 
-def clean_price(raw: str | None) -> float | None:
-    """Clean price string allowing for Dutch format (1.000,00) or standard float."""
-    if not raw:
+def clean_price(val: Any) -> float | None:
+    """
+    Cleans a price string and converts it to a float.
+    Handles Dutch/EU formats like "€ 1.234,56" or "1.000,-".
+    Also handles standard US formats if passed (though prioritizing , as decimal separator given context).
+    """
+    if val is None:
+        return None
+    if isinstance(val, (float, int)):
+        return float(val)
+
+    s = str(val).strip()
+    if not s:
         return None
 
-    # Common cleanup
-    s = (
-        raw.replace("\u20ac", "")
-        .replace("€", "")
-        .replace(".-", "")
-        .replace(",-", "")
-        .strip()
-    )
+    s = s.replace("€", "").replace("EUR", "").strip()
 
-    # Detect check: if ',' in string, decimal separator in NL context.
+    if s.endswith(",-"):
+        s = s[:-2]
+    elif s.endswith(".-"):
+        s = s[:-2]
+
     if "," in s:
         s = s.replace(".", "").replace(",", ".")
     else:
-        # If we see multiple dots, it is thousands separators.
-        if s.count(".") > 1:
-            s = s.replace(".", "")
-        elif "." in s:
-            # Single dot. Check if it looks like thousands or float.
-            pass
+        s = s.replace(".", "")
 
     try:
         return float(s)
