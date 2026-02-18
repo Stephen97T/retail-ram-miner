@@ -104,6 +104,44 @@ gcloud run jobs create ram-miner-job \
   - Writes to GCS and BigQuery only on `RUN_ENV=prod`.
   - Uses **Temp Tables + MERGE** in BigQuery to deduplicate data (Upsert) based on unique keys (e.g., `store_id`, `sku`, `timestamp`).
 
+#### How to create the GCP service account and key for GitHub Actions:
+
+```bash
+# Set your project (if not already)
+gcloud config set project YOUR_PROJECT_ID
+
+# Create a service account for GitHub CD
+gcloud iam service-accounts create github-cd-sa \
+  --display-name="GitHub CD SA"
+
+# Capture the service account email
+SA_EMAIL="github-cd-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com"
+
+# Set project id
+export PROJECT_ID=YOUR_PROJECT_ID
+
+# Grant required roles to the service account
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="roles/run.jobsExecutor"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="roles/cloudscheduler.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="roles/iam.serviceAccountUser"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="roles/artifactregistry.writer"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="roles/run.developer"
+
+# Create a JSON key locally (outputs a file named sa-key.json)
+gcloud iam service-accounts keys create sa-key.json \
+  --iam-account="${SA_EMAIL}"
+
+# Print the key so you can copy it into the GitHub secret
+cat sa-key.json
+# IMPORTANT: Copy the FULL JSON content into the GitHub secret (not just the private_key field)
+```
+
+After adding the variables and secret, your workflow will reference them as:
+
+- Variables: `${{ vars.GCP_PROJECT_ID }}`, `${{ vars.GCP_REGION }}`, `${{ vars.GCP_REPO_NAME }}`,
+  `${{ vars.GCP_IMAGE_NAME }}`, `${{ vars.GCP_BUCKET_NAME }}`, `${{ vars.GCP_JOB_NAME }}`
+- Secret: `${{ secrets.GCP_SA_KEY }}`
+
 ## Troubleshooting
 
 - **403 Forbidden (GCS/BigQuery)**: Check Service Account permissions. It needs access to both the specific Bucket and the Dataset.
