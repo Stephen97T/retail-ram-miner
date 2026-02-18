@@ -32,7 +32,7 @@ jobs:
         run: ruff check ram_miner tests
 
       - name: Type check with mypy
-        run: mypy ram_miner tests
+        run: mypy --config-file pyproject.toml ram_miner tests
 
       - name: Run Unit Tests
         run: pytest
