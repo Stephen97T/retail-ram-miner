@@ -5,10 +5,14 @@ from ram_miner.utils.io import read_lines, upload_to_gcs
 
 
 @patch("ram_miner.utils.io.get_gcs_client")
+@patch("os.makedirs")
 @patch("os.path.exists")
 @patch("builtins.open", new_callable=mock_open, read_data='{"id": 1}\n')
 def test_read_lines_bucket(
-    mock_file: MagicMock, mock_exists: MagicMock, mock_get_client: MagicMock
+    mock_file: MagicMock,
+    mock_exists: MagicMock,
+    mock_makedirs: MagicMock,
+    mock_get_client: MagicMock,
 ) -> None:
     data_dir = "data/test"
     filename = "test.jsonl"
@@ -33,6 +37,7 @@ def test_read_lines_bucket(
     # Blob path should use forward slashes even on Windows
     expected_blob_path = file_path.replace("\\", "/")
     mock_bucket.blob.assert_called_with(expected_blob_path)
+    mock_makedirs.assert_called_with(data_dir, exist_ok=True)
     mock_blob.download_to_filename.assert_called_with(file_path)
 
     # Verify read
