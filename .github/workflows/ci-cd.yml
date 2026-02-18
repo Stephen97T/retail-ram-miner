@@ -79,7 +79,19 @@ jobs:
             --set-env-vars RUN_ENV=prod,GCS_BUCKET_NAME=${{ env.BUCKET_NAME }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_DATASET_ID=${{ env.DATASET_ID }} \
             --max-retries 0
 
-      - name: Execute Cloud Run Job
+      - name: Ensure 4 AM Schedule
         run: |
-          gcloud run jobs execute ${{ env.JOB_NAME }} \
-            --region ${{ env.REGION }}
+            gcloud scheduler jobs update http daily-scrapy-trigger \
+              --location ${{ env.REGION }} \
+              --schedule "0 4 * * *" \
+              --time-zone "Europe/Paris" \
+              --uri "https://${{ env.REGION }}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/${{ env.JOB_NAME }}:run" \
+              --http-method POST \
+              --oauth-service-account-email scrapy-bigquery-loader@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+              || gcloud scheduler jobs create http daily-scrapy-trigger \
+              --location ${{ env.REGION }} \
+              --schedule "0 4 * * *" \
+              --time-zone "Europe/Paris" \
+              --uri "https://${{ env.REGION }}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/${{ env.JOB_NAME }}:run" \
+              --http-method POST \
+              --oauth-service-account-email scrapy-bigquery-loader@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
