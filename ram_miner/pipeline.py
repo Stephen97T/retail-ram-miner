@@ -163,7 +163,10 @@ class SplitToTablesPipeline:
                 # 1. Load data into temporary table
                 self._load_to_temp_table(client, jsonl_file, temp_table_id, spider)
 
-                # 2. Merge temp table into final table
+                # 2. Ensure final table exists (create if missing)
+                self._ensure_table_exists(client, final_table_id, temp_table_id, spider)
+
+                # 3. Merge temp table into final table
                 primary_keys = self.merge_keys.get(table_name, [])
                 if not primary_keys:
                     spider.logger.warning(
@@ -177,7 +180,7 @@ class SplitToTablesPipeline:
                     client, temp_table_id, final_table_id, primary_keys, spider
                 )
 
-                # 3. Clean up temp table
+                # 4. Clean up temp table
                 client.delete_table(temp_table_id, not_found_ok=True)
 
             except Exception as e:
@@ -206,6 +209,24 @@ class SplitToTablesPipeline:
         spider.logger.info(
             f"Loaded {load_job.output_rows} rows into temp table {temp_table_id}"
         )
+
+    def _ensure_table_exists(
+        self,
+        client: bigquery.Client,
+        final_table_id: str,
+        temp_table_id: str,
+        spider: scrapy.Spider,
+    ) -> None:
+        """Creates the final table using the temp table's schema if it doesn't exist."""
+        try:
+            client.get_table(final_table_id)
+        except Exception:
+            spider.logger.info(f"Table {final_table_id} not found, creating it...")
+            temp_table = client.get_table(temp_table_id)
+            final_table = bigquery.Table(final_table_id, schema=temp_table.schema)
+            # Use partitioning/clustering if needed, for now just simple schema copy
+            client.create_table(final_table)
+            spider.logger.info(f"Created table {final_table_id}")
 
     def _build_merge_query(
         self,
