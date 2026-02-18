@@ -1,25 +1,35 @@
 # Retail RAM Miner
 Automated price monitoring and analysis for RAM across major retailers (Azerty, Alternate). 
-It uses Scrapy to extract data, cleans currency/spec fields, and outputs structured datasets for downstream analytics.
+It uses Scrapy to extract data, cleans currency/spec fields, and outputs structured datasets for downstream analytics in Google BigQuery.
 
 ## Overview
 
-- Engine: Scrapy (asyncio)
-- Unblocking: Zyte API (smart proxy & browser rendering)
-- Packaging: Docker
-- Deployment: Cloud Run Job
-- Data Lake: Bronze (JSON/CSV) in GCS → Gold (structured) in cloud bucket
+- **Engine**: Scrapy (asyncio)
+- **Unblocking**: Zyte API (smart proxy & browser rendering)
+- **Packaging**: Docker
+- **Deployment**: Google Cloud Run Job
+- **Data Pipeline**: 
+  - **Dev**: Local JSONL files.
+  - **Prod**: 
+    1. Scrapes data to local JSONL (in container).
+    2. Uploads JSONL to Google Cloud Storage (GCS) for archival/state.
+    3. Loads JSONL to **BigQuery** using a formatted Merge (Upsert) strategy via temporary tables.
 
 ## Prerequisites & Local Setup
 
 ### 1. Environment Configuration
 
-Create a env variables.
+Create a `.env` file or set environment variables.
 
 ```powershell
 ZYTE_API_KEY=your_zyte_key_here
+# Google Cloud Configuration
 GCP_PROJECT_ID=your_project_id
-GCS_BUCKET_NAME=your_bucket_name
+GCP_DATASET_ID=retail_ram_data       # BigQuery Dataset ID
+GCP_BUCKET_NAME=your_gcs_bucket_name # GCS Bucket for JSONL storage
+# Application Settings
+RUN_ENV=dev                          # 'dev' (local output) or 'prod' (GCS + BigQuery)
+GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json # Required for local testing of prod features
 ```
 
 ### 2. Install dependencies and run a crawl
@@ -34,7 +44,7 @@ scrapy crawl azerty
 
 ### 3. Linting & Type Safety
 
-Ruff handles formatting/linting. Mypy enforces strict typing on cleaning functions.
+Ruff handles formatting/linting. Mypy enforces strict typing.
 
 ```powershell
 # Run all checks
@@ -42,27 +52,24 @@ ruff check .
 mypy ram_miner/
 ```
 
-## Repository Structure
+## Google Cloud Setup & Deployment
 
-```plaintext
-retail-ram-miner/
-├── ram_miner/
-│   ├── spiders/          # Store-specific logic (Azerty, Alternate)
-│   ├── utils/            # Shared cleaning functions (price/spec parsing)
-│   ├── items.py          # RAM data models
-│   └── pipelines.py      # Export logic (e.g., to cloud storage/db)
-├── tests/                # Pytest suite
-├── pyproject.toml        # Tooling config
-├── requirements.txt      # Pinned dependencies
-├── Dockerfile            # Container image
-└── docker-compose.yml    # Local container orchestration
-```
+### 1. GCP Infrastructure Setup
 
-> Note: All Python packages include `__init__.py` files for discovery (`ram_miner/`, `ram_miner/spiders/`, `ram_miner/spiders/crawlers/`, `ram_miner/utils/`, `tests/`, `tests/crawlers/`).
+Before deploying, ensure the following resources exist in your Google Cloud Project:
 
-## Google Cloud Deployment (Cloud Run Job)
+1.  **Project**: Create a GCP Project.
+2.  **Storage**: Create a **Cloud Storage Bucket** (e.g., `ram-miner-data`) to store raw JSONL files.
+3.  **BigQuery**: Create a **BigQuery Dataset** (e.g., `retail_ram_data`).
+    *   *Note: Tables (`stores`, `brands`, `hardware`, `listings`, `prices`, `inventory`) will be auto-created by the pipeline if they don't exist.*
+4.  **Artifact Registry**: Create a Docker repository (e.g., `retail-repo`) in your region.
+5.  **Service Account**: Create a Service Account (e.g., `ram-miner-sa`) with the following IAM roles:
+    *   `Storage Object Creator` (Write to GCS)
+    *   `Storage Object Viewer` (Read to GCS)
+    *   `BigQuery Job User` (Run query/load jobs)
+    *   `BigQuery Data Editor` (Read/Write to Dataset)
 
-### Build & push the container image
+### 2. Build & Push Container
 
 ```powershell
 # Authenticate Docker with Artifact Registry
@@ -73,14 +80,18 @@ docker build -t us-central1-docker.pkg.dev/[PROJECT_ID]/retail-repo/ram-miner:v1
 docker push us-central1-docker.pkg.dev/[PROJECT_ID]/retail-repo/ram-miner:v1
 ```
 
-### Create the Cloud Run Job
+### 3. Create Cloud Run Job
+
+Create the job with the necessary environment variables. The job executes the Scrapy spider.
 
 ```powershell
 gcloud run jobs create ram-miner-job \
   --image us-central1-docker.pkg.dev/[PROJECT_ID]/retail-repo/ram-miner:v1 \
   --region us-central1 \
-  --memory 1Gi \
-  --set-env-vars ZYTE_API_KEY=[KEY],GCS_BUCKET_NAME=[BUCKET],GCP_PROJECT_ID=[PROJECT_ID]
+  --tasks 1 \
+  --memory 2Gi \
+  --service-account=ram-miner-sa@YOUR_PROJECT.iam.gserviceaccount.com \
+  --set-env-vars "^:^ZYTE_API_KEY=[KEY]:GCS_BUCKET_NAME=[BUCKET]:GCP_PROJECT_ID=[PROJECT_ID]:GCP_DATASET_ID=retail_ram_data:RUN_ENV=prod"
 ```
 
 ## CI/CD (GitHub Actions)
@@ -89,16 +100,16 @@ gcloud run jobs create ram-miner-job \
 - Lint: Ruff checks formatting and unused imports
 - Build: Python 3.12-slim Docker image
 - Deploy: Push to Artifact Registry and update Cloud Run Job
-- Concurrency:
-  - `group: cd-${{ github.ref }}` ensures one active deployment per ref
-  - `cancel-in-progress: true` cancels older runs for the same ref
+- **Pipeline Strategy**:
+  - Writes to GCS and BigQuery only on `RUN_ENV=prod`.
+  - Uses **Temp Tables + MERGE** in BigQuery to deduplicate data (Upsert) based on unique keys (e.g., `store_id`, `sku`, `timestamp`).
 
 ## Troubleshooting
 
-- 403 Forbidden: Zyte API key missing → check `.env` or Secret Manager
-- ModuleNotFoundError: Missing `__init__.py` → ensure package folders have init files
-- MemoryLimitExceeded: Increase Cloud Run Job memory (e.g., `2Gi`)
-- Network/Version issues: Use Python 3.12 for Scrapy-only stacks
+- **403 Forbidden (GCS/BigQuery)**: Check Service Account permissions. It needs access to both the specific Bucket and the Dataset.
+- **Merge Errors**: Ensure `MERGE_KEYS` are correctly defined in `settings.py` for each table.
+- **ModuleNotFoundError**: Missing `__init__.py` or `setup.py` issues.
+- **MemoryLimitExceeded**: Increase Cloud Run Job memory (e.g., `2Gi` -> `4Gi`).
 
 ## License
 

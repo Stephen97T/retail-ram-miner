@@ -36,10 +36,6 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0
 # Logging
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
-# Google Cloud Platform / BigQuery Configuration
-GOOGLE_APPLICATION_CREDENTIALS = os.environ.get(
-    "GOOGLE_APPLICATION_CREDENTIALS"
-)  # Path to service account JSON key
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 GCP_DATASET_ID = os.environ.get("GCP_DATASET_ID")
 BIGQUERY_TABLE_NAMES = [
@@ -50,7 +46,17 @@ BIGQUERY_TABLE_NAMES = [
     "prices",
     "inventory",
 ]
+
+MERGE_KEYS = {
+    "stores": ["store_id"],
+    "brands": ["brand_id"],
+    "hardware": ["mpn", "brand_id"],
+    "listings": ["store_id", "store_sku"],
+    "prices": ["store_id", "store_sku", "timestamp"],
+    "inventory": ["store_id", "store_sku", "timestamp"],
+}
 # Note: GOOGLE_APPLICATION_CREDENTIALS env var should point to your service account JSON key file
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")
 
 # Enable or disable pipelines
 ITEM_PIPELINES = {

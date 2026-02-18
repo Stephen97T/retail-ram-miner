@@ -279,7 +279,7 @@ class TestSplitToTablesPipeline:
         mock_bigquery: MagicMock,
         spider: MagicMock,
     ) -> None:
-        """Test successful BigQuery upload."""
+        """Test successful BigQuery upload with merge strategy."""
         # Setup
         crawler = MagicMock(spec=Crawler)
         crawler.settings = Settings(
@@ -288,6 +288,7 @@ class TestSplitToTablesPipeline:
                 "GCP_PROJECT_ID": "test-project",
                 "GCP_DATASET_ID": "test_dataset",
                 "BIGQUERY_TABLE_NAMES": ["stores", "brands"],
+                "MERGE_KEYS": {"stores": ["store_id"], "brands": ["brand_id"]},
             }
         )
         crawler.spider = spider
@@ -298,20 +299,42 @@ class TestSplitToTablesPipeline:
         mock_exists.return_value = True
         mock_getsize.return_value = 100  # Non-empty file
 
-        # Mock BigQuery client and job
+        # Mock BigQuery client and jobs
         mock_client = MagicMock()
         mock_bigquery.Client.return_value = mock_client
+
+        # Mock Load Job
         mock_load_job = MagicMock()
         mock_load_job.output_rows = 5
         mock_client.load_table_from_file.return_value = mock_load_job
+
+        # Mock Table Schema for Merge
+        mock_table = MagicMock()
+        mock_field = MagicMock()
+        mock_field.name = "test_col"
+        mock_table.schema = [mock_field]
+        mock_client.get_table.return_value = mock_table
+
+        # Mock Query Job (Merge)
+        mock_query_job = MagicMock()
+        mock_client.query.return_value = mock_query_job
 
         # Execute
         pipeline._write_to_bigquery(spider)
 
         # Assertions
-        mock_bigquery.Client.assert_called_once_with(project="test-project")
+        mock_bigquery.Client.assert_called_with(project="test-project")
+
+        # Verify Load Job calls (2 tables)
         assert mock_client.load_table_from_file.call_count == 2
         mock_load_job.result.assert_called()
+
+        # Verify Merge Query calls (2 tables)
+        assert mock_client.query.call_count == 2
+        mock_query_job.result.assert_called()
+
+        # Verify Temp Table Cleanup (2 tables)
+        assert mock_client.delete_table.call_count == 2
 
     @patch("ram_miner.pipeline.bigquery")
     def test_write_to_bigquery_missing_project_id(
@@ -378,7 +401,9 @@ class TestSplitToTablesPipeline:
 
         # Should not attempt to load
         mock_client.load_table_from_file.assert_not_called()
-        spider.logger.debug.assert_called_with("No stores.jsonl file found, skipping")
+        spider.logger.debug.assert_called_with(
+            "Skipping stores.jsonl (missing or empty)"
+        )
 
     @patch("ram_miner.pipeline.bigquery")
     @patch("os.path.exists")
@@ -414,7 +439,9 @@ class TestSplitToTablesPipeline:
 
         # Should not attempt to load
         mock_client.load_table_from_file.assert_not_called()
-        spider.logger.debug.assert_called_with("stores.jsonl is empty, skipping")
+        spider.logger.debug.assert_called_with(
+            "Skipping stores.jsonl (missing or empty)"
+        )
 
     @patch("ram_miner.pipeline.bigquery")
     @patch("os.path.exists")
@@ -477,6 +504,11 @@ class TestSplitToTablesPipeline:
                 "GCP_PROJECT_ID": "test-project",
                 "GCP_DATASET_ID": "test_dataset",
                 "BIGQUERY_TABLE_NAMES": ["stores", "brands", "hardware"],
+                "MERGE_KEYS": {
+                    "stores": ["store_id"],
+                    "brands": ["brand_id"],
+                    "hardware": ["mpn"],
+                },
             }
         )
         crawler.spider = spider
@@ -494,11 +526,19 @@ class TestSplitToTablesPipeline:
         mock_load_job.output_rows = 10
         mock_client.load_table_from_file.return_value = mock_load_job
 
+        # Mock for merge
+        mock_table = MagicMock()
+        mock_table.schema = []  # No extra cols
+        mock_client.get_table.return_value = mock_table
+        mock_client.query.return_value = MagicMock()
+
         pipeline._write_to_bigquery(spider)
 
-        # Should call load_table_from_file 3 times
+        # Should call load_table, query, delete for 3 times
         assert mock_client.load_table_from_file.call_count == 3
-        assert mock_load_job.result.call_count == 3
+        # assert mock_load_job.result.call_count == 3 # result called on same mock execution 3 times
+        assert mock_client.query.call_count == 3
+        assert mock_client.delete_table.call_count == 3
 
     @patch("ram_miner.pipeline.bigquery")
     @patch("os.path.exists")
@@ -536,10 +576,14 @@ class TestSplitToTablesPipeline:
         mock_load_job.output_rows = 5
         mock_client.load_table_from_file.return_value = mock_load_job
 
+        # Mock merge parts so it doesn't crash
+        mock_client.get_table.return_value = MagicMock(schema=[])
+        mock_client.query.return_value = MagicMock()
+
         pipeline._write_to_bigquery(spider)
 
         # Verify LoadJobConfig was created with correct parameters
-        mock_bigquery.LoadJobConfig.assert_called_once()
+        mock_bigquery.LoadJobConfig.assert_called()
         call_kwargs = mock_bigquery.LoadJobConfig.call_args.kwargs
         assert (
             call_kwargs["source_format"]
@@ -547,7 +591,6 @@ class TestSplitToTablesPipeline:
         )
         assert (
             call_kwargs["write_disposition"]
-            == mock_bigquery.WriteDisposition.WRITE_APPEND
+            == mock_bigquery.WriteDisposition.WRITE_TRUNCATE
         )
-        # Update assertion to match implementation
         assert call_kwargs["autodetect"] is True

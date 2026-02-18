@@ -24,6 +24,7 @@ class SplitToTablesPipeline:
         self.table_names = self.crawler.settings.getlist(
             "BIGQUERY_TABLE_NAMES",
         )
+        self.merge_keys = self.crawler.settings.get("MERGE_KEYS")
 
         if self.run_env == "prod":
             self.bucket_name = self.crawler.settings.get("GCS_BUCKET_NAME")
@@ -127,17 +128,17 @@ class SplitToTablesPipeline:
 
     def _write_to_bigquery(self, spider: scrapy.Spider) -> None:
         """
-        Bulk insert JSONL files to Google BigQuery.
-        Reads from ./data/{spider_name}/*.jsonl and loads into BigQuery tables.
-        Requires 'google-cloud-bigquery' package and GOOGLE_APPLICATION_CREDENTIALS env var.
+        Standardizes JSONL files to BigQuery tables using a temporary table approach.
+        1. Loads data into temp tables.
+        2. Merges temp tables into final tables (insert new, update existing if data changed).
+        3. Drops temp tables.
         """
         project_id = self.crawler.settings.get("GCP_PROJECT_ID")
         dataset_id = self.crawler.settings.get("GCP_DATASET_ID", "retail_ram_data")
 
-        for id in [project_id, dataset_id]:
-            if not id:
-                spider.logger.error(f"Missing required BigQuery configuration: {id}")
-                return
+        if not project_id or not dataset_id:
+            spider.logger.error("Missing required BigQuery configuration")
+            return
 
         # Initialize BigQuery client
         try:
@@ -150,38 +151,138 @@ class SplitToTablesPipeline:
         for table_name in self.table_names:
             jsonl_file = os.path.join(self.data_dir, f"{table_name}.jsonl")
 
-            if not os.path.exists(jsonl_file):
-                spider.logger.debug(f"No {table_name}.jsonl file found, skipping")
+            if not os.path.exists(jsonl_file) or os.path.getsize(jsonl_file) == 0:
+                spider.logger.debug(f"Skipping {table_name}.jsonl (missing or empty)")
                 continue
 
-            # Check if file is empty
-            if os.path.getsize(jsonl_file) == 0:
-                spider.logger.debug(f"{table_name}.jsonl is empty, skipping")
-                continue
-
-            table_id = f"{project_id}.{dataset_id}.{table_name}"
+            final_table_id = f"{project_id}.{dataset_id}.{table_name}"
+            # Use specific temp table name to avoid collisions
+            temp_table_id = f"{project_id}.{dataset_id}.temp_{table_name}_{spider.name}"
 
             try:
-                # Configure the load job
-                job_config = bigquery.LoadJobConfig(
-                    source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-                    autodetect=True,
-                    create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
-                )
+                # 1. Load data into temporary table
+                self._load_to_temp_table(client, jsonl_file, temp_table_id, spider)
 
-                # Load data from JSONL file
-                with open(jsonl_file, "rb") as source_file:
-                    load_job = client.load_table_from_file(
-                        source_file, table_id, job_config=job_config
+                # 2. Ensure final table exists (create if missing)
+                self._ensure_table_exists(client, final_table_id, temp_table_id, spider)
+
+                # 3. Merge temp table into final table
+                primary_keys = self.merge_keys.get(table_name, [])
+                if not primary_keys:
+                    spider.logger.warning(
+                        f"No merge keys defined for {table_name}, skipping merge."
                     )
+                    # Still clean up temp table
+                    client.delete_table(temp_table_id, not_found_ok=True)
+                    continue
 
-                # Wait for the job to complete
-                load_job.result()
-
-                spider.logger.info(
-                    f"Loaded {load_job.output_rows} rows into {table_id}"
+                self._merge_tables(
+                    client, temp_table_id, final_table_id, primary_keys, spider
                 )
+
+                # 4. Clean up temp table
+                client.delete_table(temp_table_id, not_found_ok=True)
 
             except Exception as e:
                 spider.logger.error(f"Failed to load {table_name} to BigQuery: {e}")
+
+    def _load_to_temp_table(
+        self,
+        client: bigquery.Client,
+        jsonl_file: str,
+        temp_table_id: str,
+        spider: scrapy.Spider,
+    ) -> None:
+        """Loads JSONL data into a temporary BigQuery table."""
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            autodetect=True,
+            create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
+        )
+
+        with open(jsonl_file, "rb") as source_file:
+            load_job = client.load_table_from_file(
+                source_file, temp_table_id, job_config=job_config
+            )
+        load_job.result()
+        spider.logger.info(
+            f"Loaded {load_job.output_rows} rows into temp table {temp_table_id}"
+        )
+
+    def _ensure_table_exists(
+        self,
+        client: bigquery.Client,
+        final_table_id: str,
+        temp_table_id: str,
+        spider: scrapy.Spider,
+    ) -> None:
+        """Creates the final table using the temp table's schema if it doesn't exist."""
+        try:
+            client.get_table(final_table_id)
+        except Exception:
+            spider.logger.info(f"Table {final_table_id} not found, creating it...")
+            temp_table = client.get_table(temp_table_id)
+            final_table = bigquery.Table(final_table_id, schema=temp_table.schema)
+            # Use partitioning/clustering if needed, for now just simple schema copy
+            client.create_table(final_table)
+            spider.logger.info(f"Created table {final_table_id}")
+
+    def _build_merge_query(
+        self,
+        final_table_id: str,
+        temp_table_id: str,
+        primary_keys: list[str],
+        schema: list[Any],
+    ) -> str:
+        """Constructs the MERGE query for upserting data."""
+        columns = [field.name for field in schema if field.name not in primary_keys]
+
+        on_clause = " AND ".join([f"T.{key} = S.{key}" for key in primary_keys])
+
+        # Build UPDATE SET clause (COALESCE preserves existing values if source is NULL)
+        update_clause = ", ".join(
+            [f"{col} = COALESCE(S.{col}, T.{col})" for col in columns]
+        )
+
+        all_columns = [field.name for field in schema]
+        insert_cols = ", ".join(all_columns)
+        insert_vals = ", ".join([f"S.{col}" for col in all_columns])
+
+        if not columns:
+            # If only primary keys exist, just insert if missing
+            return f"""
+                MERGE `{final_table_id}` T
+                USING `{temp_table_id}` S
+                ON {on_clause}
+                WHEN NOT MATCHED THEN
+                    INSERT ({insert_cols}) VALUES ({insert_vals})
+            """
+
+        return f"""
+            MERGE `{final_table_id}` T
+            USING `{temp_table_id}` S
+            ON {on_clause}
+            WHEN MATCHED THEN
+                UPDATE SET {update_clause}
+            WHEN NOT MATCHED THEN
+                INSERT ({insert_cols}) VALUES ({insert_vals})
+        """
+
+    def _merge_tables(
+        self,
+        client: bigquery.Client,
+        temp_table_id: str,
+        final_table_id: str,
+        primary_keys: list[str],
+        spider: scrapy.Spider,
+    ) -> None:
+        """Executes the merge from temporary table to final table."""
+        table_ref = client.get_table(temp_table_id)
+        merge_query = self._build_merge_query(
+            final_table_id, temp_table_id, primary_keys, table_ref.schema
+        )
+
+        spider.logger.info(f"Merging {temp_table_id} into {final_table_id}...")
+        client.query(merge_query).result()
+        spider.logger.info(f"Merge completed for {final_table_id}")
