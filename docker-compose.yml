@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: us-central1-docker.pkg.dev/retail-ram-miner/miner-repo/crawler:latest
+    image: us-east1-docker.pkg.dev/retail-ram-miner/miner-repo/crawler:latest
 
     container_name: retail-ram-miner
 
