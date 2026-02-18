@@ -7,6 +7,7 @@ env:
   REGION: ${{ vars.GCP_REGION }}
   REPO_NAME: ${{ vars.GCP_REPO_NAME }}
   IMAGE_NAME: ${{ vars.GCP_IMAGE_NAME }}
+  DATASET_ID: ${{ vars.GCP_DATASET_ID }}
   BUCKET_NAME: ${{ vars.GCP_BUCKET_NAME }}
   JOB_NAME: ${{ vars.GCP_JOB_NAME }}
 
@@ -68,9 +69,14 @@ jobs:
         run: |
           gcloud run jobs deploy ${{ env.JOB_NAME }} \
             --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tasks 1 \
+            --parallelism 1 \
             --region ${{ env.REGION }} \
-            --memory 2Gi \
-            --set-env-vars ENV_STATE=prod,GCS_BUCKET_NAME=${{ env.BUCKET_NAME }} \
+            --service-account scrapy-bigquery-loader@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --command scrapy \
+            --args crawl,azerty \
+            --memory 1Gi \
+            --set-env-vars RUN_ENV=prod,GCS_BUCKET_NAME=${{ env.BUCKET_NAME }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_DATASET_ID=${{ env.DATASET_ID }} \
             --max-retries 0
 
       - name: Execute Cloud Run Job
