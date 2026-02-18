@@ -236,17 +236,18 @@ class TestSplitToTablesPipeline:
         pipeline.close_spider(spider)
         pipeline._write_to_bigquery.assert_not_called()
 
-    @patch("ram_miner.state.load_lines")
+    @patch("ram_miner.state._read_lines")
     def test_deduplication_loading(
-        self, mock_load_lines: MagicMock, pipeline: SplitToTablesPipeline
+        self, mock_read_lines: MagicMock, pipeline: SplitToTablesPipeline
     ) -> None:
         """Test that existing IDs are loaded to prevent duplicates."""
         pipeline.data_dir = "tests/data_mock"
 
-        # Define side effects for load_lines based on filename
-        def load_lines_side_effect(
-            data_dir: str, filename: str
+        # Define side effects for read_lines based on filepath
+        def read_lines_side_effect(
+            file_path: str, bucket_name: str | None = None
         ) -> list[dict[str, Any] | None]:
+            filename = os.path.basename(file_path)
             if filename == "stores.jsonl":
                 return [{"store_id": 1, "store_name": "TestStore"}]
             elif filename == "brands.jsonl":
@@ -257,7 +258,7 @@ class TestSplitToTablesPipeline:
                 return [{"store_id": 1, "store_sku": "SKU1"}]
             return []
 
-        mock_load_lines.side_effect = load_lines_side_effect
+        mock_read_lines.side_effect = read_lines_side_effect
 
         pipeline._load_state()
 

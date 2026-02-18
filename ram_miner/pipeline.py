@@ -8,6 +8,7 @@ from scrapy.crawler import Crawler
 
 import ram_miner.state as state
 from ram_miner.utils.cleaning import ensure_timestamp, normalize_identifier
+from ram_miner.utils.io import upload_to_gcs
 from ram_miner.utils.records import prepare_all_records
 
 
@@ -20,6 +21,14 @@ class SplitToTablesPipeline:
         self.seen_brand_ids: set[int] = set()
         self.seen_hardware_mpns: set[str] = set()
         self.seen_listings: set[tuple[int, str]] = set()
+        self.table_names = self.crawler.settings.getlist(
+            "BIGQUERY_TABLE_NAMES",
+        )
+
+        if self.run_env == "prod":
+            self.bucket_name = self.crawler.settings.get("GCS_BUCKET_NAME")
+        else:
+            self.bucket_name = None
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> "SplitToTablesPipeline":
@@ -37,10 +46,18 @@ class SplitToTablesPipeline:
 
     def close_spider(self, spider: scrapy.Spider) -> None:
         if self.run_env == "prod":
+            for table in self.table_names:
+                local_path = os.path.join(self.data_dir, f"{table}.jsonl")
+                if os.path.exists(local_path):
+                    spider.logger.info(
+                        f"Uploading {table} to GCS bucket {self.bucket_name}"
+                    )
+                    upload_to_gcs(self.bucket_name, local_path)
+
             self._write_to_bigquery(spider)
 
     def _load_state(self) -> None:
-        loaded = state.load_state(self.data_dir)
+        loaded = state.load_state(self.data_dir, self.bucket_name)
         self.seen_store_ids = loaded["seen_store_ids"]
         self.seen_brand_ids = loaded["seen_brand_ids"]
         self.seen_hardware_mpns = loaded["seen_hardware_mpns"]
@@ -129,13 +146,8 @@ class SplitToTablesPipeline:
             spider.logger.error(f"Failed to initialize BigQuery client: {e}")
             return
 
-        # Get table names from settings
-        table_names = self.crawler.settings.getlist(
-            "BIGQUERY_TABLE_NAMES",
-        )
-
         # Upload each JSONL file to its corresponding BigQuery table
-        for table_name in table_names:
+        for table_name in self.table_names:
             jsonl_file = os.path.join(self.data_dir, f"{table_name}.jsonl")
 
             if not os.path.exists(jsonl_file):

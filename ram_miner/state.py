@@ -1,23 +1,10 @@
-import json
 import os
-from collections.abc import Iterator
 from typing import Any
 
-
-def load_lines(data_dir: str, filename: str) -> Iterator[dict[str, Any]]:
-    fp = os.path.join(data_dir, filename)
-    if os.path.exists(fp):
-        try:
-            with open(fp, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        yield json.loads(line)
-        except Exception:
-            # Logging should be handled by caller
-            pass
+from ram_miner.utils.io import read_lines as _read_lines
 
 
-def load_state(data_dir: str) -> dict[str, Any]:
+def load_state(data_dir: str, bucket_name: str | None = None) -> dict[str, Any]:
     """
     Loads deduplication state from local files.
     Returns a dict with keys: seen_store_ids, seen_brand_ids, seen_hardware_mpns, seen_listings
@@ -29,19 +16,19 @@ def load_state(data_dir: str) -> dict[str, Any]:
         "seen_listings": set(),
     }
     # 1. Stores
-    for record in load_lines(data_dir, "stores.jsonl"):
+    for record in _read_lines(os.path.join(data_dir, "stores.jsonl"), bucket_name):
         if "store_id" in record:
             state["seen_store_ids"].add(record["store_id"])
     # 2. Brands
-    for record in load_lines(data_dir, "brands.jsonl"):
+    for record in _read_lines(os.path.join(data_dir, "brands.jsonl"), bucket_name):
         if "brand_id" in record:
             state["seen_brand_ids"].add(record["brand_id"])
     # 3. Hardware
-    for record in load_lines(data_dir, "hardware.jsonl"):
+    for record in _read_lines(os.path.join(data_dir, "hardware.jsonl"), bucket_name):
         if "mpn" in record and record["mpn"]:
             state["seen_hardware_mpns"].add(record["mpn"])
     # 4. Listings
-    for record in load_lines(data_dir, "listings.jsonl"):
+    for record in _read_lines(os.path.join(data_dir, "listings.jsonl"), bucket_name):
         if "store_id" in record and "store_sku" in record:
             key = (record["store_id"], str(record["store_sku"]))
             state["seen_listings"].add(key)
