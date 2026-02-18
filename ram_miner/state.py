@@ -20,15 +20,13 @@ def load_lines(data_dir: str, filename: str) -> Iterator[dict[str, Any]]:
 def load_state(data_dir: str) -> dict[str, Any]:
     """
     Loads deduplication state from local files.
-    Returns a dict with keys: seen_store_ids, seen_brand_ids, seen_hardware_mpns, seen_listings, latest_prices, latest_inventory
+    Returns a dict with keys: seen_store_ids, seen_brand_ids, seen_hardware_mpns, seen_listings
     """
     state: dict[str, Any] = {
         "seen_store_ids": set(),
         "seen_brand_ids": set(),
         "seen_hardware_mpns": set(),
         "seen_listings": set(),
-        "latest_prices": {},
-        "latest_inventory": {},
     }
     # 1. Stores
     for record in load_lines(data_dir, "stores.jsonl"):
@@ -47,19 +45,4 @@ def load_state(data_dir: str) -> dict[str, Any]:
         if "store_id" in record and "store_sku" in record:
             key = (record["store_id"], str(record["store_sku"]))
             state["seen_listings"].add(key)
-    # 5. Prices
-    for record in load_lines(data_dir, "prices.jsonl"):
-        if "store_id" in record and "store_sku" in record:
-            key = (record["store_id"], str(record["store_sku"]))
-            state["latest_prices"][key] = record.get("price")
-    # 6. Inventory
-    for record in load_lines(data_dir, "inventory.jsonl"):
-        if "store_id" in record and "store_sku" in record:
-            key = (record["store_id"], str(record["store_sku"]))
-            inv_state = (
-                record.get("stock_store"),
-                record.get("stock_supplier"),
-                record.get("availability"),
-            )
-            state["latest_inventory"][key] = inv_state
     return state
