@@ -3,7 +3,7 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
-from google.cloud import storage
+from google.cloud import storage  # type: ignore[attr-defined]
 
 
 def get_gcs_client() -> storage.Client:
