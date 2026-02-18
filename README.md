@@ -19,8 +19,13 @@ Create a env variables.
 ```powershell
 ZYTE_API_KEY=your_zyte_key_here
 GCP_PROJECT_ID=your_project_id
-GCS_BUCKET_NAME=your_bucket_name
+GCP_DATASET_ID=retail_ram_data  # Optional, defaults to retail_ram_data
+GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json
+RUN_ENV=dev  # Use 'prod' for BigQuery writes, 'dev' for local JSONL files
 ```
+
+**Note**: For local development (`RUN_ENV=dev`), data is written to `./data/{spider_name}/*.jsonl`. 
+For production (`RUN_ENV=prod`), data is bulk-loaded to BigQuery from these JSONL files.
 
 ### 2. Install dependencies and run a crawl
 
