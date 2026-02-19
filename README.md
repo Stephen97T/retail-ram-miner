@@ -254,6 +254,7 @@ Before deploying, ensure the following resources exist in your Google Cloud Proj
     *   `Secret Manager Secret Accessor` (Read secrets)
     *   `BigQuery Job User` (Run query/load jobs)
     *   `BigQuery Data Editor` (Read/Write to Dataset)
+    *   `Cloud Run Invoker` (Allow Cloud Schedule to run job)
 
 ### Create Service Account for the Scraper
 
@@ -287,6 +288,10 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/secretmanager.secretAccessor"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/run.invoker"
 ```
 
 **Result**: Your service account should look like this in the GCP Console:
