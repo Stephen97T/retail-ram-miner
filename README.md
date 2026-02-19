@@ -254,6 +254,7 @@ Before deploying, ensure the following resources exist in your Google Cloud Proj
     *   `Secret Manager Secret Accessor` (Read secrets)
     *   `BigQuery Job User` (Run query/load jobs)
     *   `BigQuery Data Editor` (Read/Write to Dataset)
+    *   `Cloud Run Invoker` (Allow Cloud Schedule to run job)
 
 ### Create Service Account for the Scraper
 
